@@ -93,6 +93,17 @@ def source_identity(repo: Path) -> dict:
     return {"revision": revision, "source_sha256": digest.hexdigest()}
 
 
+#: Tasks whose entry-point commands need a world flag beyond the shared CLI.
+#: `--hoop` is `jumper.sixers_dunk`'s own argument (its `cli_args`); train,
+#: replay and export must all pass it or the observation layout disagrees with
+#: the checkpoint. A map, not ifs: adding a worlded task is one line here.
+TASK_WORLD_ARGS = {"jumper.sixers_dunk": ["--hoop"]}
+
+
+def world_args(task: str) -> list[str]:
+    return list(TASK_WORLD_ARGS.get(task, []))
+
+
 def make_config(repo: Path, *, task: str, model: str, num_envs: int) -> dict:
     if num_envs < 1:
         raise ValueError("num_envs must be positive")
@@ -826,6 +837,7 @@ def main() -> None:
                    "--model", args.model, "--backend", "warp", "--device", "cuda:0",
                    "--num_envs", str(args.num_envs), "--max-iterations", str(args.iterations),
                    "--headless", "--no-tensorboard", "--logger", "tensorboard"]
+        command += world_args(args.task)
         if args.resume is not None:
             command += ["--checkpoint", str(args.resume.resolve())]
         run_training(command, repo=args.repo, manifest_path=args.manifest, config=config,
