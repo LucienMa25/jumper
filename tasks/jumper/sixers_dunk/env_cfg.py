@@ -74,6 +74,29 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
         raise ValueError(f"--hoop would overwrite existing entities {clash}")
     entities.update(dunk_entities())
 
+    # ── the reset events that actually place the props ──
+    # Adding the entity is not enough: mjlab applies `env_origins` inside
+    # `reset_root_state_uniform`, and an entity with no reset event stays at
+    # (0, 0, 0) in **every** environment (five_foot's `objects.py::_place_props`
+    # states this outright). Measured on `model_299`, 2026-11-04: with no events
+    # the ball spawned buried at the world origin and the hoop was not per-env
+    # replicated, so `ball_in_hoop`'s distance test became a constant and the
+    # run trained on a scoring bug. The pose range is **empty** — the entity's
+    # own `init_state` supplies the offset, and passing it again would land the
+    # prop at twice the distance.
+    from mjlab.envs.mdp import events as mdp_events
+    from mjlab.managers.event_manager import EventTermCfg
+    from mjlab.managers.scene_entity_config import SceneEntityCfg
+
+    for name in ("dunk_ball", "dunk_hoop"):
+        cfg.events[f"reset_prop_{name}"] = EventTermCfg(
+            func=mdp_events.reset_root_state_uniform,
+            mode="reset",
+            params={"pose_range": {}, "velocity_range": {},
+                    "asset_cfg": SceneEntityCfg(name)},
+        )
+
+
     # ── observations: both groups see the world they must act on ──
     for group in ("actor", "critic"):
         terms = cfg.observations[group].terms
