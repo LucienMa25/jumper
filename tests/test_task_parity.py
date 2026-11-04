@@ -77,6 +77,11 @@ NOT_LOCOMOTION = {
     # training. Beside the four it would compare a walking control group to
     # a manipulation task, which is measuring the wrong thing entirely.
     "jumper.sixers_dunk",
+    # The celebration layered on flat: no gait, no world, no operator in
+    # training (commands neutral), and three reward terms that shape a
+    # heading, a claw posture and a counted pump sequence. It measures a
+    # routine, not a walking policy; the four have no reading of it.
+    "jumper.sixers_crown",
     # Stands on a swing and pumps it: no command, so none of the tracking,
     # gait-gated or curriculum terms the four share survive, and the three terms
     # it does share had to be rewritten against the deck because the floor tilts.
