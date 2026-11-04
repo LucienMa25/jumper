@@ -14,14 +14,16 @@ than a stale copy of it.
      replays under, imported not restated;
   2. two observation terms on both groups (`mdp/terms.py`), critic and actor:
      ball and hoop offset from the robot;
-  3. four staged rewards: approach 1.0 / lift 1.5 / carry 1.0 / score 4.0.
-     The budget is deliberately shallow early — three of the four are shaping
-     a skill five_foot has never been asked for, and a dominant term would
-     teach a lottery-ticket fling before a walk;
+  3. four staged rewards: approach 3.0 / lift 4.0 / carry 3.0 / score 15.0.
+     The first budget (1.0/1.5/1.0/4.0) measured flatline — standing collects
+     ~13.7 per step of inherited locomotion shaping and outshouts a 0.06-per-
+     step approach term; the weights are now above that comfort zone;
   4. a fixed spawn facing down-court. five_foot pins its spawn only under
      `--objects`; here the pin applies whenever the world is present,
      training included — an approach task whose ball starts behind the robot
-     half the time is measuring randomisation, not skill.
+     half the time is measuring randomisation, not skill. Commands go neutral
+     in **training only**: replay keeps five_foot's own operator behaviour so
+     the fixed-command evaluation path still resolves `twist`.
 
 Unlike five_foot's `--objects` (replay-only, "a policy replayed here walks on
 friction it was not trained with"), **`--hoop` is meant for training and
@@ -49,11 +51,11 @@ def env_cfg(
 ):
     cfg = _five_foot_env_cfg(asset=asset, play=play)   # objects=False
     if hoop:
-        _apply_hoop_world(cfg)
+        _apply_hoop_world(cfg, play=play)
     return cfg
 
 
-def _apply_hoop_world(cfg) -> None:
+def _apply_hoop_world(cfg, *, play: bool) -> None:
     from .props import HOOP_X, HOOP_Y, BALL_X, BALL_Y
 
     # ── physics capacity and the prop friction model (five_foot's, imported) ──
@@ -78,32 +80,31 @@ def _apply_hoop_world(cfg) -> None:
         terms["ball_rel_pos"] = ObservationTermCfg(func=ball_rel_pos)
         terms["hoop_rel_pos"] = ObservationTermCfg(func=hoop_rel_pos)
 
-    # ── staged rewards (weights are this task's decision, written down) ──
+    # ── staged rewards ──
+    # The weights are this task's decision, and the first run measured why:
+    # standing still collects ~13.7 per step of the inherited locomotion budget
+    # while the ball at 0.585 m paid 1.0 x 0.06 = 0.06 per step -- the dunk
+    # stages were never loud enough to move the policy (`model_1999`,
+    # 2026-11-04: approach/carry/score all exactly 0.0000, action std collapsed
+    # to 0.06). They are raised until the goal-directed gradient beats that
+    # comfort zone; the sigma widening keeps early progress visible. If the
+    # second run shows the same flatline, the budget is still wrong, not the
+    # robot.
     cfg.rewards["approach_ball"] = RewardTermCfg(
-        func=approach_ball, weight=1.0, params={"sigma": 0.35})
+        func=approach_ball, weight=3.0, params={"sigma": 0.60})
     cfg.rewards["ball_lifted"] = RewardTermCfg(
-        func=ball_lifted, weight=1.5, params={"cap": 0.12})
+        func=ball_lifted, weight=4.0, params={"cap": 0.12})
     cfg.rewards["carry_to_hoop"] = RewardTermCfg(
-        func=carry_to_hoop, weight=1.0, params={"sigma": 0.35})
+        func=carry_to_hoop, weight=3.0, params={"sigma": 0.50})
     cfg.rewards["ball_in_hoop"] = RewardTermCfg(
-        func=ball_in_hoop, weight=4.0, params={"rim_h": HOOP_RIM_H + 0.04})
+        func=ball_in_hoop, weight=15.0, params={"rim_h": HOOP_RIM_H + 0.04})
 
-    # ── fixed spawn and neutral commands ──
-    # Pin by narrowing the task's own `reset_base` (five_foot's pattern):
-    # keep every other key of `pose_range` — `z` is a settle, not a position —
-    # and put x/y/yaw at a point so the ball is always ahead-left and the
-    # hoop ahead-right.
-    #
-    # Commands go **neutral in training too**, which is the point of the
-    # design: with the sampled command pinned at rest, the base tracking
-    # reward is already maximised by standing, and `approach_ball` becomes
-    # the only gradient that moves the robot. The policy learns *goal-directed*
-    # walking with no operator; on hardware the same checkpoint runs under an
-    # operator's zero command. A goal-command interface (joystick-to-ball
-    # vector, or an autonomous planner on top of `jumper.posture`) is the
-    # stage-2 upgrade; do not let sampled twist commands coexist with the
-    # approach reward, or the robot is pulled by two masters and both
-    # numbers on the dashboard look fine while the policy learns nothing.
+    # ── fixed spawn ──
+    # Pinned in train and replay alike: the ball and hoop sit at known env-
+    # relative positions, so a random spawn would sometimes start them behind
+    # the robot. Pin by narrowing the task's own `reset_base` (five_foot's
+    # pattern) and keep every other key of `pose_range` -- `z` is a settle,
+    # not a position.
     reset = cfg.events.get("reset_base")
     if reset is None:
         raise ValueError("--hoop pins the spawn, and this config has no 'reset_base'")
@@ -113,12 +114,26 @@ def _apply_hoop_world(cfg) -> None:
     pose["yaw"] = (0.0, 0.0)
     reset.params["pose_range"] = pose
 
-    stilled = []
-    for name, command in cfg.commands.items():
-        for field_name in ("rel_standing_envs", "rel_neutral_envs"):
-            if hasattr(command, field_name):
-                setattr(command, field_name, 1.0)
-                stilled.append(f"{name}.{field_name}")
-    if not stilled:
-        raise ValueError("--hoop wants neutral commands; no command term carries them")
+    # ── neutral commands: TRAINING ONLY ──
+    # With the sampled command pinned at rest, the base tracking reward is
+    # already maximised by standing, and `approach_ball` becomes the only
+    # gradient that moves the robot. The policy learns *goal-directed* walking
+    # with no operator; on hardware the same checkpoint runs under an operator's
+    # zero command.
+    #
+    # Replay keeps five_foot's own behaviour (the operator drives; hands off,
+    # the sampled command passes through) -- pinning replay too would leave the
+    # `twist` command term with no operator bindings to drive and break the
+    # fixed-command evaluation path. (`model_1999`'s notebook run hit exactly
+    # that: a neutralised replay refused `--command` evaluation.)
+    if not play:
+        stilled = []
+        for name, command in cfg.commands.items():
+            for field_name in ("rel_standing_envs", "rel_neutral_envs"):
+                if hasattr(command, field_name):
+                    setattr(command, field_name, 1.0)
+                    stilled.append(f"{name}.{field_name}")
+        if not stilled:
+            raise ValueError("--hoop wants neutral commands; no command term carries them")
+
 
