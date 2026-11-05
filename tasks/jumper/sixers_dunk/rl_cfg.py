@@ -34,7 +34,12 @@ def agent_cfg() -> RslRlOnPolicyRunnerCfg:
         critic_hidden_dims=(512, 256, 128, 64),
         init_std=1.0,
         # ── PPO ──
-        entropy_coef=0.005,
+        # 0.005 was the family's; the v2 run collapsed action std to 0.09 by
+        # iteration ~900 and the policy stopped exploring toward the ball
+        # entirely (approach_ball flat at its spawn baseline). This task needs
+        # the policy to *walk away from the comfortable stance* to find reward,
+        # so its entropy bonus is raised until measured otherwise.
+        entropy_coef=0.02,
         learning_rate=1.0e-3,
         desired_kl=0.01,
         gamma=0.99,

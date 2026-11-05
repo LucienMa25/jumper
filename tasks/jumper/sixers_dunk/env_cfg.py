@@ -74,6 +74,18 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
         raise ValueError(f"--hoop would overwrite existing entities {clash}")
     entities.update(dunk_entities())
 
+    # ── drop the payload curriculum (v3, measured on the v2 run, 2026-11-05) ──
+    # five_foot's payload ladder promotes when "the policy tracks the top
+    # command rung" -- and this task pins the command at zero, so standing
+    # perfectly *is* the top rung: v2 promoted at iteration ~921 and loaded
+    # 0.6 kg onto the carried arm for no reason the task can use. The load
+    # also makes reaching and gripping the ball physically harder while it
+    # pays nothing toward it. The startup event (empty claw, rung 0) stays --
+    # `requires_model_fields` is what makes body_mass writable per world --
+    # only the ladder goes.
+    if "payload" in cfg.curriculum:
+        del cfg.curriculum["payload"]
+
     # ── the reset events that actually place the props ──
     # Adding the entity is not enough: mjlab applies `env_origins` inside
     # `reset_root_state_uniform`, and an entity with no reset event stays at

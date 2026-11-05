@@ -39,7 +39,11 @@ from ..five_foot.objects import (
 #: official game ball (0.624 kg) is out of the claw's measured grip budget at
 #: stage 1; mass is set by density over the sphere volume below.
 BALL_R = 0.075
-BALL_X, BALL_Y = 0.55, -0.20
+#: v3: was (0.55, -0.20) — d=0.585 m put the high-value region too far for
+# the entropy budget to bump into it by iteration ~900 (v2 measurement).
+# 0.43 m now: still a walk, reachable by a exploring policy within its first
+# steps of interest.
+BALL_X, BALL_Y = 0.40, -0.15
 BALL_MASS = 0.16
 #: leather orange, the same hue as the arena-map ball so the finished video
 #: reads as one object across simulator and replay.
