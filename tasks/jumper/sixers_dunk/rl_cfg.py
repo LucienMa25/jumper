@@ -39,7 +39,7 @@ def agent_cfg() -> RslRlOnPolicyRunnerCfg:
         # entirely (approach_ball flat at its spawn baseline). This task needs
         # the policy to *walk away from the comfortable stance* to find reward,
         # so its entropy bonus is raised until measured otherwise.
-        entropy_coef=0.02,
+        entropy_coef=0.03,
         learning_rate=1.0e-3,
         desired_kl=0.01,
         gamma=0.99,

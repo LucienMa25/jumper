@@ -30,6 +30,7 @@ from __future__ import annotations
 import torch
 
 from mjlab.envs import ManagerBasedRlEnv
+from mjlab.managers.manager_base import ManagerTermBase
 
 from ..props import BALL_R, HOOP_INNER
 
@@ -73,6 +74,50 @@ def ball_rel_pos(env: ManagerBasedRlEnv) -> torch.Tensor:
 
 def hoop_rel_pos(env: ManagerBasedRlEnv) -> torch.Tensor:
     return _hoop_pos(env) - _robot_pos(env)
+
+
+class BallProgress(ManagerTermBase):
+    """v4: shape the *motion toward* the ball, not the distance to it.
+
+    Per control step: clip((prev_d - d) / v_full, 0, 1). Walking toward the
+    ball at v_full m/s pays 1.0 per step; standing pays **0** -- which is the
+    point. The v3 GPU run (2026-11-06, 1000 iterations) showed why distance
+    shaping alone fails: standing collects ~13.7 per step of inherited
+    locomotion shaping and the spawn-to-ball gap is only ~1.2, so once
+    `Policy/mean_std` collapsed (0.11) no policy could discover the walk.
+    Progress pays for the walk itself, every step of it, from wherever it
+    starts.
+
+    State lives per environment like the crown's pump counter: `reset`
+    re-arms on episode end so a reset-prop's teleport (the placement event
+    moves the ball back to its spawn) is not read as a huge free progress
+    gain -- the step after any reset returns 0.
+    """
+
+    def __init__(self, cfg, env: ManagerBasedRlEnv):
+        super().__init__(env)
+        params = getattr(cfg, "params", {}) or {}
+        self.v_full = float(params.get("v_full", 0.24))
+        self._prev = None
+
+    def reset(self, env_ids):
+        if self._prev is None:
+            return
+        if env_ids is None or isinstance(env_ids, slice):
+            self._prev[:] = float("nan")
+        else:
+            self._prev[env_ids] = float("nan")
+
+    def __call__(self, env: ManagerBasedRlEnv, **_params) -> torch.Tensor:
+        b, r = _ball_pos(env), _robot_pos(env)
+        d = torch.linalg.norm(b[:, :2] - r[:, :2], dim=1)
+        if self._prev is None:
+            self._prev = d.clone()
+            return torch.zeros_like(d)
+        gain = ((self._prev - d) / self.v_full).clamp(0.0, 1.0)
+        gain = torch.where(self._prev.isnan(), torch.zeros_like(gain), gain)
+        self._prev = d
+        return gain
 
 
 # ── rewards ──────────────────────────────────────────────────────────────────

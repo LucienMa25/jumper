@@ -43,7 +43,7 @@ BALL_R = 0.075
 # the entropy budget to bump into it by iteration ~900 (v2 measurement).
 # 0.43 m now: still a walk, reachable by a exploring policy within its first
 # steps of interest.
-BALL_X, BALL_Y = 0.40, -0.15
+BALL_X, BALL_Y = 0.30, -0.12
 BALL_MASS = 0.16
 #: leather orange, the same hue as the arena-map ball so the finished video
 #: reads as one object across simulator and replay.

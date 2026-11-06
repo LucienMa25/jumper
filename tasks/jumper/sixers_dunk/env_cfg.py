@@ -39,8 +39,8 @@ from mjlab.managers.observation_manager import ObservationTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 
 from ..five_foot.env_cfg import env_cfg as _five_foot_env_cfg
-from .mdp.terms import approach_ball, ball_in_hoop, ball_lifted, carry_to_hoop, \
-    hoop_rel_pos, ball_rel_pos
+from .mdp.terms import (BallProgress, approach_ball, ball_in_hoop, ball_lifted,
+                        carry_to_hoop, hoop_rel_pos, ball_rel_pos)
 from .props import HOOP_RIM_H, dunk_entities
 
 
@@ -127,6 +127,12 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
     # robot.
     cfg.rewards["approach_ball"] = RewardTermCfg(
         func=approach_ball, weight=3.0, params={"sigma": 0.60})
+    # v4: the distance budget above plateaued at the standing baseline on GPU
+    # (v3, 2026-11-06: 1.91 peak at ~500, back to 1.76 by 1000 as std
+    # collapsed to 0.11). Progress pays for the walk itself -- 6.0 per step at
+    # v_full against standing's 0.0 -- so the 1.2 comfort gap stops mattering.
+    cfg.rewards["ball_progress"] = RewardTermCfg(
+        func=BallProgress, weight=6.0, params={"v_full": 0.24})
     cfg.rewards["ball_lifted"] = RewardTermCfg(
         func=ball_lifted, weight=4.0, params={"cap": 0.12})
     cfg.rewards["carry_to_hoop"] = RewardTermCfg(
