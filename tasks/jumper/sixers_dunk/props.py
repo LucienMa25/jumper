@@ -43,7 +43,13 @@ BALL_R = 0.075
 # the entropy budget to bump into it by iteration ~900 (v2 measurement).
 # 0.43 m now: still a walk, reachable by a exploring policy within its first
 # steps of interest.
-BALL_X, BALL_Y = 0.30, -0.12
+#: v6: the needle goes into the haystack. v5 (4000 iters x 1024 envs, 41M
+# steps, std held at 0.79) never discovered goal-directed walking from 0.43 m
+# -- a random walk carries no bearing prior, so no reward gradient was ever
+# *touched* to learn from. The ball now spawns 0.19 m ahead: inside the first
+# flail's reach. Combined with the sharpened cone below, guarding the ball
+# becomes the new (intended) comfort zone, and progress/lift unlock outward.
+BALL_X, BALL_Y = 0.18, -0.05
 BALL_MASS = 0.16
 #: leather orange, the same hue as the arena-map ball so the finished video
 #: reads as one object across simulator and replay.
