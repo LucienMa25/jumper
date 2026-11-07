@@ -126,13 +126,18 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
     # second run shows the same flatline, the budget is still wrong, not the
     # robot.
     cfg.rewards["approach_ball"] = RewardTermCfg(
-        func=approach_ball, weight=3.0, params={"sigma": 0.60})
+        func=approach_ball, weight=8.0, params={"sigma": 0.35})
+    # v6: sigma 0.35/weight 8.0 make *staying at the ball* the profitable
+    # posture (spawn sits inside the cone: exp(-(0.19/0.35)^2)*8 ≈ 6.0/step),
+    # so the first thing the policy needs to learn is "don't leave", from
+    # which progress and lift are one fling away. v5 proved an empty world of
+    # 0.43 m is one the policy will never bridge on its own.
     # v4: the distance budget above plateaued at the standing baseline on GPU
     # (v3, 2026-11-06: 1.91 peak at ~500, back to 1.76 by 1000 as std
     # collapsed to 0.11). Progress pays for the walk itself -- 6.0 per step at
     # v_full against standing's 0.0 -- so the 1.2 comfort gap stops mattering.
     cfg.rewards["ball_progress"] = RewardTermCfg(
-        func=BallProgress, weight=6.0, params={"v_full": 0.24})
+        func=BallProgress, weight=6.0, params={"v_full": 0.15})
     cfg.rewards["ball_lifted"] = RewardTermCfg(
         func=ball_lifted, weight=4.0, params={"cap": 0.12})
     cfg.rewards["carry_to_hoop"] = RewardTermCfg(
