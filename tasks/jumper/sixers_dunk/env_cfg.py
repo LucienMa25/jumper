@@ -140,6 +140,22 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
     cfg.rewards["ball_in_hoop"] = RewardTermCfg(
         func=ball_in_hoop, weight=15.0, params={"rim_h": HOOP_RIM_H + 0.04})
 
+    # ── v5: zero the standing-comfort terms ────────────────────────────────
+    # v4's curve (2026-11-07, 4090D, 4000 iters) ended exactly at the
+    # standing baseline: track_linear 3.9 + track_angular 4.8 + feet_planted
+    # 5.0 ≈ 13.7 per step paid to a robot that commands nothing and goes
+    # nowhere, while the whole dunk budget paid ≤9. With commands pinned to
+    # zero those tracking terms *are* a standing bonus — they no longer
+    # describe the task's goal, they oppose it. Zeroed here, loudly; the
+    # five_foot base keeps them at full weight for its own runs.
+    # The safety floor stays: upright/pose/dof limits/self-collision still
+    # penalise falling and flailing; `fell_over` still terminates.
+    for comfort in ("track_linear_velocity", "track_angular_velocity",
+                    "feet_planted", "five_foot_gait"):
+        if comfort in cfg.rewards:
+            cfg.rewards[comfort].weight = 0.0
+
+
     # ── fixed spawn ──
     # Pinned in train and replay alike: the ball and hoop sit at known env-
     # relative positions, so a random spawn would sometimes start them behind
