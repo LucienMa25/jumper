@@ -79,7 +79,29 @@ BALL_R = 0.040
 # cone's fat end — spawn already paid ~5.7/8 and the replay showed a robot
 # that parks next to its own ball. 0.35 m cuts the spawn value to ~2.9/8:
 # the rest of that cone has to be walked for.
-BALL_X, BALL_Y = 0.35, -0.02
+#: v12.1 (operator, 2026-11-08): **three balls AND three cups**, each ball
+#: paired with its own hole, the stations staggered across the court ("三组
+#: 小球和圆洞要有位置上的落差") so that after sinking one the robot has to
+#: **run to the next firing position** — the reward follows the nearest
+#: undelivered ball, so the run between stations is the task's spine, not an
+#: afterthought. Ball i scores in cup i (`BALLS_XY[i]` ↔ `CUPS_XY[i]`); the
+#: pairings below are chosen so no fairway pushes a ball into a *neighbour's*
+#: cup (every cross distance stays above `SCORE_R` + ball radius once the
+#: ball is short of its own mouth).
+BALLS_XY: tuple[tuple[float, float], ...] = (
+    (0.35, -0.35),      # station 0: right of centre, the short shot
+    (0.50,  0.55),      # station 1: far left, reached after the first sink
+    (0.95,  0.05),      # station 2: centre, the deep one up the fairway
+)
+CUPS_XY: tuple[tuple[float, float], ...] = (
+    (1.15, -0.55),      # cup 0: 0.85 m off station 0's ball
+    (1.05,  0.85),      # cup 1: 0.95 m off station 1's ball
+    (1.85,  0.05),      # cup 2: 0.90 m, dead down the middle
+)
+BALL_NAMES: tuple[str, ...] = tuple(f"dunk_ball_{i}"
+                                    for i in range(len(BALLS_XY)))
+CUP_NAMES: tuple[str, ...] = tuple(f"dunk_cup_{i}"
+                                   for i in range(len(CUPS_XY)))
 #: 30 g — a superball. Held across two jaws at mu_s 0.35 the pinch needs only
 #: N >= mg / 2mu ~= 0.42 N, and the actuator tops out at `STIFFNESS *
 #: SQUEEZE_LEAD` = 0.6 N·m at the fingertip — the grip has room to spare.
@@ -90,16 +112,17 @@ BALL_MASS = 0.03
 #: only ball in the video.
 BALL_RGBA = (0.82, 0.33, 0.10, 1.0)
 
-HOOP_X, HOOP_Y = 1.45, 0.15
-#: v11.1 (operator, 2026-11-08): pushed out to 1.45 m — the fairway got a
-#: full step longer than v11's 1.20 — and off-axis only slightly, so the
-#: push is still mostly the straight-ahead skill.
-#: v11 (operator review, 2026-11-08): the square box is now a **circular
+#: v12.1: **three cups, one per ball**, at `CUPS_XY`. Each is the v11.2
+#: design — a continuous arc wall standing flush on the terrain with the
+#: mouth facing the robot's side of the court; sized to hold its own ball
+#: (and, come a happy accident, all three).
+#: v12: the cup interior is `HOOP_INNER` = 0.115, a container three balls
+#: could share (triangle packing needs `BALL_R * (1 + 2/sqrt(3)) ~= 0.105`),
+#: so no cup is too tight for a stray.
+HOOP_INNER = 0.115
+#: v11 (operator review, 2026-11-08): the square box became a **circular
 #: cup** — a golf hole at the end of the fairway, as asked ("用前臂推小球
-#: 进洞，类似打高尔夫"). **v11.1: one ball + a 30 mm annular margin** —
-#: the operator asked for a bigger cup, and with no floor disc the interior
-#: is the terrain itself, so a wide mouth costs nothing in hold.
-HOOP_INNER = round(BALL_R + 0.030, 3)   # 0.070 — ~1.75 ball-widths across
+#: 进洞，类似打高尔夫").
 #: v10 (operator review): the post/arm/backboard/rim stand is **gone** — ten
 #: runs proved the claw cannot get the ball off the floor at all, so nothing
 #: overhead was ever part of the task. The cup takes the whole role.
@@ -137,7 +160,7 @@ def _ball_spec():
     return spec
 
 
-def _hoop_spec():
+def _hoop_spec(body_name: str = "dunk_hoop"):
     """The scoring cup: a **continuous arc wall** standing directly on the
     terrain, with a flush mouth on the robot's side (v11.2; see the `HOOP_*`
     notes).
@@ -155,7 +178,7 @@ def _hoop_spec():
     bounces off the wall of its own cup rather than sliding the target away.
     """
     spec = _prop_spec()
-    body = spec.worldbody.add_body(name="dunk_hoop", pos=[0.0, 0.0, 0.0])
+    body = spec.worldbody.add_body(name=body_name, pos=[0.0, 0.0, 0.0])
     inner, t, h = HOOP_INNER, HOOP_WALL_T, HOOP_RIM_H
     import math as _math
     r_wall = inner + t / 2                 # panel mid-surface radius
@@ -182,15 +205,23 @@ def _hoop_spec():
 
 
 def dunk_entities() -> dict[str, EntityCfg]:
-    """The two props, at their scene positions (relative to each env origin,
-    the way five_foot's row places its props)."""
-    return {
-        "dunk_ball": EntityCfg(
+    """The three balls and their three cups, at their scene positions
+    (relative to each env origin, the way five_foot's row places its props).
+    Entity names are unique, so every body inside a spec may keep the plain
+    name it was authored with: mjlab attaches each entity under a
+    `"{entity}/"` prefix (`rl/mjlab/scene/scene.py`)."""
+    entities = {
+        name: EntityCfg(
             spec_fn=_ball_spec,
             init_state=EntityCfg.InitialStateCfg(
-                pos=(BALL_X, BALL_Y, BALL_R + 0.002))),   # a hair above rest:
+                pos=(x, y, BALL_R + 0.002)))   # a hair above rest:
         #   settles, never starts buried (objects.py: burial ejects the prop)
-        "dunk_hoop": EntityCfg(
-            spec_fn=_hoop_spec,
-            init_state=EntityCfg.InitialStateCfg(pos=(HOOP_X, HOOP_Y, 0.0))),
+        for name, (x, y) in zip(BALL_NAMES, BALLS_XY)
     }
+    entities.update({
+        name: EntityCfg(
+            spec_fn=lambda n=name: _hoop_spec(n),
+            init_state=EntityCfg.InitialStateCfg(pos=(x, y, 0.0)))
+        for name, (x, y) in zip(CUP_NAMES, CUPS_XY)
+    })
+    return entities
