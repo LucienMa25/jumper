@@ -138,6 +138,32 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
                     "asset_cfg": SceneEntityCfg(name)},
         )
 
+    # ── v9: the claw→ball contact sensor ─────────────────────────────────
+    # Eight runs (v1-v8) settled it: this claw does not pinch a floor-level
+    # ball. `five_foot/env_cfg.py` states the geometry outright — the stowed
+    # claw hangs **40 mm off the floor** — and the ball's centre is 32 mm,
+    # so the jaws can never be across it; every contact is the under-jaw
+    # shoving the ball along the ground. Rather than keep paying a `lift`
+    # term the hardware cannot collect, the task now rewards that shove as
+    # the carry: `carry_to_hoop` gates on jaw-on-ball contact, and a ball
+    # that was kicked and rolls free earns nothing. `GRIP_GEOMS` is exactly
+    # the four jaw faces plus their convex pieces; the secondary is the
+    # ball's single geom.
+    from mjlab.sensor import ContactMatch, ContactSensorCfg
+    from ..five_foot.jaws import GRIP_GEOMS
+
+    claw_ball = ContactSensorCfg(
+        name="claw_ball_contact",
+        primary=ContactMatch(mode="geom", pattern=GRIP_GEOMS, entity="robot"),
+        secondary=ContactMatch(mode="geom", pattern="dunk_ball",
+                               entity="dunk_ball"),
+        fields=("found",),
+        reduce="none",
+        num_slots=1,
+        history_length=cfg.decimation,
+    )
+    cfg.scene.sensors = (cfg.scene.sensors or ()) + (claw_ball,)
+
 
     # ── observations: both groups see the world they must act on ──
     for group in ("actor", "critic"):
@@ -156,7 +182,11 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
     # second run shows the same flatline, the budget is still wrong, not the
     # robot.
     cfg.rewards["approach_ball"] = RewardTermCfg(
-        func=approach_ball, weight=8.0, params={"sigma": 0.35})
+        func=approach_ball, weight=8.0,
+        params={"sigma": 0.35, "leave_r": 0.30})
+    # v9 stop rule: the cone goes quiet when the ball is near the hoop, so
+    # the push stage owns the end of the court; `ball_lifted` below is the
+    # only stage that still cares about height.
     # v6: sigma 0.35/weight 8.0 make *staying at the ball* the profitable
     # posture (spawn sits inside the cone: exp(-(0.19/0.35)^2)*8 ≈ 6.0/step),
     # so the first thing the policy needs to learn is "don't leave", from
@@ -168,11 +198,19 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
     # v_full against standing's 0.0 -- so the 1.2 comfort gap stops mattering.
     cfg.rewards["ball_progress"] = RewardTermCfg(
         func=BallProgress, weight=6.0, params={"v_full": 0.15})
+    # v9: the lift stage is **retired** (weight 0). Its premise failed eight
+    # times over: `five_foot/env_cfg.py` measures the stowed claw hanging
+    # 40 mm off the floor, and no gait in this machine lowers the palm to a
+    # 32 mm ball centre. What the hardware does have is a jaw face that
+    # presses the ball against the ground and walks — so `carry_to_hoop`'s
+    # new contact gate (below) *is* stage 2 now, and this slot stays wired
+    # at zero only so old checkpoints keep their observation/reward layout.
     cfg.rewards["ball_lifted"] = RewardTermCfg(
-        func=ball_lifted, weight=4.0, params={"cap": 0.12})
+        func=ball_lifted, weight=0.0, params={"cap": 0.12})
     cfg.rewards["carry_to_hoop"] = RewardTermCfg(
-        func=carry_to_hoop, weight=3.0,
-        params={"sigma": 0.50, "gate": "grip"})   # v7: a gripped ball only
+        func=carry_to_hoop, weight=6.0,
+        params={"sigma": 0.50, "gate": "contact",
+                "sensor_name": "claw_ball_contact"})   # v9: bulldoze carry
     cfg.rewards["ball_in_hoop"] = RewardTermCfg(
         func=ball_in_hoop, weight=15.0, params={"rim_h": HOOP_RIM_H + 0.04})
 
