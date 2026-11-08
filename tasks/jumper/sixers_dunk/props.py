@@ -138,36 +138,46 @@ def _ball_spec():
 
 
 def _hoop_spec():
-    """The scoring cup: a ring of touching vertical capsules standing
-    directly on the terrain, open at the floor, with a flush mouth on the
-    robot's side (v11.1; see the `HOOP_*` notes).
+    """The scoring cup: a **continuous arc wall** standing directly on the
+    terrain, with a flush mouth on the robot's side (v11.2; see the `HOOP_*`
+    notes).
 
-    No floor disc and no sill — the operator asked for a smooth roll-in
-    ("丝滑"), and the interior *is* the scene's own ground. The mouth is a
-    gap in the ring about two ball-widths wide at the -x side; everything
-    else is the wall, 35 mm tall, which a pushed ball cannot ride over
-    (~8x its weight would be needed) but walks straight through the mouth
-    under. Static — no freejoint — so it stays where it is put and a missed
-    push bounces off the wall of its own cup rather than sliding the target
-    away.
+    No floor disc, no sill, no posts. MuJoCo has no hollow-cylinder or torus
+    primitive in this binding, so the ring is built the way a real curved
+    retaining wall is built: **`nseg` thin panels laid along the tangents of
+    one circle**, each spanning its chord and overlapping its neighbours by a
+    few millimetres so the joints are solid — one continuous 6 mm-thick,
+    35 mm-tall wall, flat on the inside and outside, that a pushed ball can
+    neither slip through nor ride over. The mouth is simply the one arc of
+    panels left out at -x.
+
+    Static — no freejoint — so it stays where it is put and a missed push
+    bounces off the wall of its own cup rather than sliding the target away.
     """
     spec = _prop_spec()
     body = spec.worldbody.add_body(name="dunk_hoop", pos=[0.0, 0.0, 0.0])
-    inner, h = HOOP_INNER, HOOP_RIM_H
+    inner, t, h = HOOP_INNER, HOOP_WALL_T, HOOP_RIM_H
     import math as _math
-    r_wall = inner + 0.008                      # capsule centres; interior ~inner
-    cap_r = 0.005
-    nseg = 28
-    mouth = _math.asin(min(0.95, 0.060 / r_wall))   # half-angle of the gap
+    r_wall = inner + t / 2                 # panel mid-surface radius
+    nseg = 24
+    step = 2.0 * _math.pi / nseg
+    half_chord = r_wall * _math.tan(step / 2) + 0.004   # + overlap at joints
+    mouth = _math.asin(min(0.95, 0.060 / r_wall))       # half-angle of the gap
     for i in range(nseg):
-        a = 2.0 * _math.pi * i / nseg
+        a = step * i
         da = abs((a - _math.pi + _math.pi) % (2 * _math.pi) - _math.pi)  # to 180°
-        if da < mouth + 2 * _math.pi / nseg:
+        if da < mouth:
             continue                                    # inside the mouth
-        _prop_geom(body, name=f"hoop_wall_{i}", type=mujoco.mjtGeom.mjGEOM_CAPSULE,
-                   size=[cap_r, h / 2, 0.0],
+        # the panel is a box whose +x axis lies on the circle's TANGENT at its
+        # midpoint: a tangent at angle `a` is the +x axis turned by a + 90 deg
+        # (quaternion w,x,y,z of that z-rotation).
+        ang = a + _math.pi / 2
+        qw, qs = _math.cos(ang / 2), _math.sin(ang / 2)
+        _prop_geom(body, name=f"hoop_wall_{i}", type=mujoco.mjtGeom.mjGEOM_BOX,
+                   size=[half_chord, t / 2, h / 2],
                    pos=[r_wall * _math.cos(a), r_wall * _math.sin(a), h / 2],
-                   rgba=list(HOOP_RGBA), mass=0.02)
+                   quat=[qw, 0.0, 0.0, qs],
+                   rgba=list(HOOP_RGBA), mass=0.03)
     return spec
 
 
