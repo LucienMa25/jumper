@@ -1,28 +1,21 @@
-"""Staged dunk terms: approach → lift → carry → score, plus the observations.
+"""Staged dunk terms: approach → grip → carry → score, plus the observations.
 
 Each stage is a term the policy can feel *before* the next one unlocks, the
 same ladder the command curriculum uses for walking: nothing here pays for
 the whole trick at once.
 
-    stage 1  approach_ball   −dist(ball, claw) while the claw is empty
-    stage 2  ball_lifted     ball height above its rest, gated on the grip
-    stage 3  carry_to_hoop   −dist(ball, hoop) while the ball is lifted
-    stage 4  ball_in_hoop    one-shot: ball centre inside the rim footprint
-                             and under the rim top — the score.
+    stage 1  approach_ball   exp(-d^2/sigma^2) while the claw is not closed
+    stage 1b ball_progress   per-step credit for shrinking that distance
+    stage 2  ball_lifted     ball height above rest (only a grip can hold it)
+    stage 3  carry_to_hoop   -dist(ball, hoop) while the ball is GRIPPED
+    stage 4  ball_in_hoop    ball centre inside the rim footprint, under the
+                             rim line — the score
 
-Stage 2's "lifted" gate is z-only because **the claw cannot see its own grip**
-at this scaffold stage: five_foot knows it holds something through
-`mdp/grasp.py::ClawHold`, whose support-pair test is calibrated against the
-box/can/hull props in `jaws.py`. A sphere breaks that calibration (point
-contact, no flat support faces), so until stage 2 on the GPU re-calibrates
-`ClawHold` for `dunk_ball`, `ball_lifted` reads the ball itself — the policy
-is rewarded for the ball being up, whatever mechanism achieved it. That is
-honest shaping, not a lie about sensing: the z test is the ground truth the
-grip test was always a proxy for.
-
-TODO(stage-2, GPU): extend `jaws.py` grip rule + `ClawHold` support pair to
-the sphere; then gate stage 3 on ClawHold rather than on z, so the policy
-cannot farm `carry_to_hoop` by flinging the ball.
+v7 moved the grip inside the policy: `env_cfg` puts LF_J4 in the action, and
+the carry stage gates on `grip` — the same reading the claw's own teleop
+uses (aperture shut *and* ball off the floor), so a rolled or flicked ball
+no longer unlocks stage 3. The aperture is the finger joint's own position,
+read from the state every observation term already lives on.
 """
 
 from __future__ import annotations
@@ -33,6 +26,7 @@ from mjlab.envs import ManagerBasedRlEnv
 from mjlab.managers.manager_base import ManagerTermBase
 
 from ..props import BALL_R, HOOP_INNER
+from ...five_foot.claw import FINGER_JOINT
 
 def _ball_lift(env: ManagerBasedRlEnv) -> torch.Tensor:
     """Height of the ball centre above its resting height on this env's
@@ -53,6 +47,22 @@ def _ball_pos(env: ManagerBasedRlEnv) -> torch.Tensor:
 
 def _hoop_pos(env: ManagerBasedRlEnv) -> torch.Tensor:
     return env.scene["dunk_hoop"].data.root_link_pose_w[:, :3]
+
+
+_SHUT_APERTURE = -0.2   # rad; between GRIPPER_OPEN -0.65 and CLOSED 0.10,
+#                        past halfway means the mouth has taken the ball
+
+
+def _aperture(env: ManagerBasedRlEnv) -> torch.Tensor:
+    """The finger joint's own position [B] — the aperture the policy drives
+    since v7 put LF_J4 in the action. Resolved by the entity's name API."""
+    robot = env.scene["robot"]
+    idx = getattr(env, "_dunk_finger_idx", None)
+    if idx is None:
+        ids, _ = robot.find_joints([FINGER_JOINT])
+        idx = int(ids[0])
+        env._dunk_finger_idx = idx
+    return robot.data.joint_pos[:, idx]
 
 
 def _robot_pos(env: ManagerBasedRlEnv) -> torch.Tensor:
@@ -138,11 +148,19 @@ def ball_lifted(env: ManagerBasedRlEnv, cap: float = 0.12) -> torch.Tensor:
     return (lift / cap).clamp(max=1.0)
 
 
-def carry_to_hoop(env: ManagerBasedRlEnv, sigma: float = 0.35) -> torch.Tensor:
-    """Same shaping as approach, but ball→hoop, and it only lives while the
-    ball is lifted — carrying without holding scores nothing."""
+def carry_to_hoop(env: ManagerBasedRlEnv, sigma: float = 0.35,
+                  gate: str = "lift") -> torch.Tensor:
+    """Same shaping as approach, but ball→hoop.
+
+    gate="grip" (v7, what env_cfg wires): the ball counts as carried only
+    while it is **off the floor and the aperture is shut** — a flicked or
+    rolled ball must not unlock the third stage. gate="lift" is the v6
+    behaviour, kept for replaying older checkpoints.
+    """
     d = torch.linalg.norm(_ball_pos(env) - _hoop_pos(env), dim=1)
     lifted = _ball_lift(env) > 0.02
+    if gate == "grip":
+        lifted = lifted & (_aperture(env) > _SHUT_APERTURE)
     return torch.exp(-(d / sigma) ** 2) * lifted.float()
 
 
