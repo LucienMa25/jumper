@@ -90,26 +90,26 @@ BALL_MASS = 0.03
 #: only ball in the video.
 BALL_RGBA = (0.82, 0.33, 0.10, 1.0)
 
-HOOP_X, HOOP_Y = 1.20, 0.30
+HOOP_X, HOOP_Y = 1.45, 0.15
+#: v11.1 (operator, 2026-11-08): pushed out to 1.45 m — the fairway got a
+#: full step longer than v11's 1.20 — and off-axis only slightly, so the
+#: push is still mostly the straight-ahead skill.
 #: v11 (operator review, 2026-11-08): the square box is now a **circular
 #: cup** — a golf hole at the end of the fairway, as asked ("用前臂推小球
-#: 进洞，类似打高尔夫"). Scoring radius: one ball + a 12 mm annular margin
-#: (`HOOP_INNER` = 0.052): tighter than the box's 2-ball mouth, because a
-#: contained cup — not a doorstep — is what holds the ball once it is in.
-HOOP_INNER = round(BALL_R + 0.012, 3)   # 0.052 — the cup, ~1 ball + margin
+#: 进洞，类似打高尔夫"). **v11.1: one ball + a 30 mm annular margin** —
+#: the operator asked for a bigger cup, and with no floor disc the interior
+#: is the terrain itself, so a wide mouth costs nothing in hold.
+HOOP_INNER = round(BALL_R + 0.030, 3)   # 0.070 — ~1.75 ball-widths across
 #: v10 (operator review): the post/arm/backboard/rim stand is **gone** — ten
 #: runs proved the claw cannot get the ball off the floor at all, so nothing
-#: overhead was ever part of the task. The cup takes the whole role, and its
-#: wall rises 35 mm. The entrance toward the robot stays a 6 mm sill.
+#: overhead was ever part of the task. The cup takes the whole role.
+#: v11.1 (operator): **no raised floor, no sill** — just a ring wall standing
+#: on the terrain, its open mouth flush with the ground: the ball rolls in
+#: with nothing to climb ("丝滑"). Hold is not lost: lifting a 40 mm ball
+#: over a 35 mm step needs ~8x the ball's weight in push (F = mg*sqrt(2Rh-
+#: h^2)/(R-h)), which the walk never exerts sideways — in through the mouth,
+#: stays in.
 HOOP_WALL_T, HOOP_RIM_H = 0.006, 0.035
-#: v10.5: sill 8 -> 6 mm with the bigger ball — the entrance step is now
-#: 12 mm total (floor + sill) against a 40 mm radius: a push the walk easily
-#: produces (the lip takes F >= mg*sqrt(2Rh-h^2)/(R-h) ~ 0.35 mg, and a
-#: walking hexapod pushes at several times the ball's weight), and once the
-#: ball is inside, the 41 mm wall top is **above the ball's own centre
-#: height** — no rolling ball climbs a step taller than its radius, so the
-#: cup holds. Enter over the sill; the trap is one-way.
-HOOP_SILL_H = 0.006   # the approach-side lip, kept climbable
 HOOP_RGBA = (0.0, 0.302, 0.596, 1.0)          # Sixers blue #004D98
 
 
@@ -138,36 +138,27 @@ def _ball_spec():
 
 
 def _hoop_spec():
-    """The scoring cup: a circle of touching vertical capsules sunk around a
-    floor disc, with a low lip across the one open arc the robot pushes over
-    (v11; see the `HOOP_*` notes for the one-way geometry).
+    """The scoring cup: a ring of touching vertical capsules standing
+    directly on the terrain, open at the floor, with a flush mouth on the
+    robot's side (v11.1; see the `HOOP_*` notes).
 
-    The wall is one ring of capsules at `inner + t` laid end to end with a
-    deliberate gap on the -x side — the mouth of the cup, ~2 ball-widths
-    wide, spanned by a `HOOP_SILL_H` lip. MuJoCo has no boolean subtraction,
-    so "hole" is built the only way it can be: a rim *on* the floor, small
-    enough inside that a ball at rest in the centre reads as sunk.
-
-    Static — no freejoint — so it stays where it is put and a missed push
-    bounces off the wall of its own cup rather than sliding the target away.
+    No floor disc and no sill — the operator asked for a smooth roll-in
+    ("丝滑"), and the interior *is* the scene's own ground. The mouth is a
+    gap in the ring about two ball-widths wide at the -x side; everything
+    else is the wall, 35 mm tall, which a pushed ball cannot ride over
+    (~8x its weight would be needed) but walks straight through the mouth
+    under. Static — no freejoint — so it stays where it is put and a missed
+    push bounces off the wall of its own cup rather than sliding the target
+    away.
     """
     spec = _prop_spec()
     body = spec.worldbody.add_body(name="dunk_hoop", pos=[0.0, 0.0, 0.0])
-    inner, t, h = HOOP_INNER, HOOP_WALL_T, HOOP_RIM_H
-    _prop_geom(body, name="hoop_floor", type=mujoco.mjtGeom.mjGEOM_CYLINDER,
-               size=[inner + t, t / 2, 0.0], pos=[0.0, 0.0, t / 2],
-               rgba=list(HOOP_RGBA), mass=0.4)
-    # The cup mouth faces -x (the robot's side): the arc of capsules whose
-    # angle from +x is within `mouth` of 180 deg is left out, and the
-    # opening is spanned at sill height by one thin bar. Wall capsule
-    # centres sit a little outside `inner + t` so neighbours touch across
-    # their curved faces; the two flanking the gap are kept just clear of
-    # the lip's ends instead of blocking them.
+    inner, h = HOOP_INNER, HOOP_RIM_H
     import math as _math
-    r_wall = inner + t + 0.002
+    r_wall = inner + 0.008                      # capsule centres; interior ~inner
     cap_r = 0.005
     nseg = 28
-    mouth = _math.asin(min(1.0, 0.048 / r_wall))      # half-angle of the gap
+    mouth = _math.asin(min(0.95, 0.060 / r_wall))   # half-angle of the gap
     for i in range(nseg):
         a = 2.0 * _math.pi * i / nseg
         da = abs((a - _math.pi + _math.pi) % (2 * _math.pi) - _math.pi)  # to 180°
@@ -175,12 +166,8 @@ def _hoop_spec():
             continue                                    # inside the mouth
         _prop_geom(body, name=f"hoop_wall_{i}", type=mujoco.mjtGeom.mjGEOM_CAPSULE,
                    size=[cap_r, h / 2, 0.0],
-                   pos=[r_wall * _math.cos(a), r_wall * _math.sin(a), t + h / 2],
+                   pos=[r_wall * _math.cos(a), r_wall * _math.sin(a), h / 2],
                    rgba=list(HOOP_RGBA), mass=0.02)
-    _prop_geom(body, name="hoop_sill", type=mujoco.mjtGeom.mjGEOM_BOX,
-               size=[t / 2, 0.046, HOOP_SILL_H / 2],
-               pos=[-inner - t / 2, 0.0, t + HOOP_SILL_H / 2],
-               rgba=list(HOOP_RGBA), mass=0.05)
     return spec
 
 
