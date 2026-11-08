@@ -9,16 +9,21 @@ different physics.
 
 Layout (x ahead of the robot's spawn, y lateral):
 
-    robot @ 0        ball @ BALL_X=0.55        hoop @ HOOP_X=1.45, y=HOOP_Y=0.35
+    robot @ 0        ball @ BALL_X=0.35        box @ HOOP_X=1.20, y=HOOP_Y=0.30
 
-The ball sits on a diagonal, not straight ahead, so the path to the hoop
-requires walking *and* strafing — the five-foot skill set — instead of a
-single straight sprint one policy could fake with one gait phase.
+v10 (operator review): the ball now spawns **dead ahead** — the mechanic this
+claw can actually perform is pushing the ball forward from behind, and a
+diagonal only taught flanking. The hoop unit is the scoring box alone: the
+basketball stand was removed once measurement showed the claw never gets the
+ball off the floor, at any height (see `_hoop_spec`). The court and its NBA
+hoops come from the arena scene (`--scene`), so the video still reads as
+basketball while the physics asks only for what the machine can do.
 
-The hoop is five_foot's dropbin scaled to the ball: a 20 mm rim (the claw's
-measured lift tops out near 30 mm; a taller rim is a wall the task cannot
-ask it to climb) with inner half-width `HOOP_INNER` = ball diameter + a
-10 mm margin. Its rim is painted Sixers blue; the ball is leather orange.
+The box walls are `HOOP_RIM_H` = 35 mm on the three far sides and an 8 mm
+sill on the approach side — higher than five_foot's dropbin rim, but the
+entrance stays shallow because a ball rolled along the floor cannot be shoved
+up a step near its own radius. Far walls are Sixers blue; the ball is leather
+orange.
 """
 
 from __future__ import annotations
@@ -61,33 +66,37 @@ BALL_R = 0.032
 # becomes the new (intended) comfort zone, and progress/lift unlock outward.
 #: v9: dead ahead at 0.20 m. v8's y=-0.05 only taught the policy to flank the
 # ball; a bulldozer drives straight, and so does the claw-palm here.
-BALL_X, BALL_Y = 0.20, -0.02
+#: v10 (operator review, 2026-11-08): 0.20 m sat **inside** the approach
+# cone's fat end — spawn already paid ~5.7/8 and the replay showed a robot
+# that parks next to its own ball. 0.35 m cuts the spawn value to ~2.9/8:
+# the rest of that cone has to be walked for.
+BALL_X, BALL_Y = 0.35, -0.02
 #: 30 g — a superball. Held across two jaws at mu_s 0.35 the pinch needs only
 #: N >= mg / 2mu ~= 0.42 N, and the actuator tops out at `STIFFNESS *
 #: SQUEEZE_LEAD` = 0.6 N·m at the fingertip — the grip has room to spare.
 #: (The 160 g of v1-v7 was sized for the old 150 mm ball.)
 BALL_MASS = 0.03
-#: leather orange, the same hue as the arena-map ball so the finished video
-#: reads as one object across simulator and replay.
+#: leather orange, the same hue family as the arena's court markings read
+#: against; the arena map's own game ball was removed at v10 so this is the
+#: only ball in the video.
 BALL_RGBA = (0.82, 0.33, 0.10, 1.0)
 
-HOOP_X, HOOP_Y = 1.45, 0.35
+HOOP_X, HOOP_Y = 1.20, 0.30
 #: Three balls across, not one: the release is a blind drop off an open claw
 #: from a few centimetres up, and a one-ball box would bounce most near-misses
 #: back out — the score must measure "got it to the hoop", not pinball luck.
 #: (v1-v7: this derived 0.160 for the old 150 mm ball and never got used.)
-HOOP_INNER = round(3.5 * BALL_R + 0.010, 3)   # 0.108 — ~2 ball-widths across
-HOOP_WALL_T, HOOP_RIM_H = 0.006, 0.020
+HOOP_INNER = round(3.5 * BALL_R + 0.010, 3)   # 0.118 — ~2 ball-widths across
+#: v10 (operator review): the post/arm/backboard/rim stand is **gone** — ten
+#: runs proved the claw cannot get the ball off the floor at all, so nothing
+#: overhead was ever part of the task. The box takes the whole role, and the
+#: walls rise from 20 to 35 mm as asked ("做高一点"). The near wall stays a
+#: 8 mm sill: a ball pushed along the floor cannot climb a wall taller than a
+#: fraction of its radius (32 mm), so a full-height near wall would make the
+#: box a monument, not a target. Enter over the sill, ringed by high walls.
+HOOP_WALL_T, HOOP_RIM_H = 0.006, 0.035
+HOOP_SILL_H = 0.008   # the approach-side wall, kept climbable
 HOOP_RGBA = (0.0, 0.302, 0.596, 1.0)          # Sixers blue #004D98
-
-#: The hoop stands **above** the box: post up to a low rim, backboard behind
-#: it, and the scoring tray directly under the rim — "carry to the hoop and
-#: drop it in" reads as a basketball play, and the robot only has to reach
-#: the box at the floor. The rim height is display, not a grasp target.
-RIM_Z = 0.60
-RIM_R_MAJOR, RIM_R_TUBE = 0.12, 0.012
-POST_RGBA = (0.25, 0.27, 0.32, 1.0)
-BOARD_RGBA = (0.85, 0.92, 0.98, 0.6)
 
 
 def _prop_spec():
@@ -115,17 +124,23 @@ def _ball_spec():
 
 
 def _hoop_spec():
-    """The hoop unit: a scoring box on the floor **under a low rim**, with the
-    post and backboard that say "basketball".
+    """The scoring box, standing alone on the floor.
 
-    The box is the task's target and the only colliding part of the assembly
-    (five_foot's dropbin scaled to the ball: 20 mm rim — the claw's measured
-    lift tops out near 30 mm). The post, rim and backboard above it are
-    **visual only** (`contype=0`): the robot walks under the rim to reach the
-    box, and nothing overhead can bump the trunk or block a release.
+    **v10: the basketball stand is gone.** Ten runs measured that this claw
+    never gets the ball off the floor at all (the palm hangs 40 mm up, the
+    ball's centre is 32 mm), so a rim at any height — even a lowered one —
+    describes a throw the machine cannot make. The operator's call (2026-11-08):
+    keep only the box and make it taller. The arena map still carries the NBA
+    hoops and the court, so the *video* reads as basketball; the *task* is the
+    honest one: push the ball into the box.
 
-    Static — no freejoint — so it stays where it is put and a missed drop
-    bounces off the rim of its own box rather than sliding the target away.
+    The walls rise to `HOOP_RIM_H` (35 mm) on the three far sides, and the
+    **near wall — the side the robot comes from — is an 8 mm sill**: a ball
+    rolled along the floor cannot be shoved up a step anywhere near its own
+    radius, so the entrance has to stay shallow or the box is a monument.
+
+    Static — no freejoint — so it stays where it is put and a missed push
+    bounces off the wall of its own box rather than sliding the target away.
     """
     spec = _prop_spec()
     body = spec.worldbody.add_body(name="dunk_hoop", pos=[0.0, 0.0, 0.0])
@@ -133,68 +148,16 @@ def _hoop_spec():
     _prop_geom(body, name="hoop_floor", type=mujoco.mjtGeom.mjGEOM_BOX,
                size=[inner + t, inner + t, t / 2], pos=[0.0, 0.0, t / 2],
                rgba=list(HOOP_RGBA), mass=0.4)
-    for nm, sx, sy, px, py in (
-        ("hoop_wall_xp", t / 2, inner + t, inner + t / 2, 0.0),
-        ("hoop_wall_xm", t / 2, inner + t, -inner - t / 2, 0.0),
-        ("hoop_wall_yp", inner + t, t / 2, 0.0, inner + t / 2),
-        ("hoop_wall_ym", inner + t, t / 2, 0.0, -inner - t / 2),
+    for nm, sx, sy, px, py, wh in (
+        ("hoop_wall_xp", t / 2, inner + t, inner + t / 2, 0.0, h),
+        ("hoop_wall_xm", t / 2, inner + t, -inner - t / 2, 0.0, HOOP_SILL_H),
+        ("hoop_wall_yp", inner + t, t / 2, 0.0, inner + t / 2, h),
+        ("hoop_wall_ym", inner + t, t / 2, 0.0, -inner - t / 2, h),
     ):
         _prop_geom(body, name=nm, type=mujoco.mjtGeom.mjGEOM_BOX,
-                   size=[sx, sy, h / 2], pos=[px, py, t + h / 2],
+                   size=[sx, sy, wh / 2], pos=[px, py, t + wh / 2],
                    rgba=list(HOOP_RGBA), mass=0.1)
-
-    def _visual(**kw):
-        kw.setdefault("contype", 0)
-        kw.setdefault("conaffinity", 0)
-        kw.setdefault("group", 2)
-        body.add_geom(**kw)
-
-    # The stand rises **behind the box** (on the +x side): the robot and the
-    # ball approach from -x, so nothing of the hoop silhouette ever stands
-    # between the claw and its target. Visual only, but a post the robot
-    # walks "through" still reads wrong in a video.
-    _visual(name="hoop_post", type=mujoco.mjtGeom.mjGEOM_BOX,
-            size=[0.02, 0.02, RIM_Z / 2 + 0.1],
-            pos=[inner + 0.14, 0.0, (RIM_Z + 0.2) / 2], rgba=list(POST_RGBA))
-    # arm from post to over the box centre
-    _visual(name="hoop_arm", type=mujoco.mjtGeom.mjGEOM_BOX,
-            size=[(inner + 0.14) / 2, 0.02, 0.02],
-            pos=[(inner + 0.14) / 2 - 0.02, 0.0, RIM_Z], rgba=list(POST_RGBA))
-    # backboard behind the rim (its bottom just above the rim plane)
-    _visual(name="hoop_board", type=mujoco.mjtGeom.mjGEOM_BOX,
-            size=[0.012, 0.20, 0.15],
-            pos=[inner + 0.14, 0.0, RIM_Z + 0.20], rgba=list(BOARD_RGBA))
-    # the rim, directly over the box: this MuJoCo binding has no torus geom,
-    # so ring it the way the arena map rings its rims — short capsules laid
-    # end to end in a horizontal circle at RIM_Z (visual only)
-    import math as _math
-    nseg = 12
-    half_len = _math.pi * RIM_R_MAJOR / nseg          # chord half-length
-    for i in range(nseg):
-        a = 2.0 * _math.pi * i / nseg
-        # capsule axis (default +z) rotated onto the ring tangent
-        # (-sin a, cos a, 0): axis-angle of z -> tangent
-        q = _quat_z_to((-_math.sin(a), _math.cos(a), 0.0))
-        _visual(name=f"hoop_rim_{i}", type=mujoco.mjtGeom.mjGEOM_CAPSULE,
-                size=[RIM_R_TUBE, half_len, 0.0],
-                pos=[RIM_R_MAJOR * _math.cos(a), RIM_R_MAJOR * _math.sin(a), RIM_Z],
-                quat=q, rgba=[0.898, 0.278, 0.098, 1.0])  # orange, arena-matched
     return spec
-
-
-def _quat_z_to(vec):
-    """Quaternion (w, x, y, z) rotating +z onto `vec` (MJCF/Spec order)."""
-    import numpy as np
-    v = np.asarray(vec, dtype=float)
-    v = v / np.linalg.norm(v)
-    axis = np.cross([0.0, 0.0, 1.0], v)
-    s = float(np.linalg.norm(axis))
-    c = float(np.dot([0.0, 0.0, 1.0], v))
-    if s < 1e-9:
-        return [1.0, 0.0, 0.0, 0.0] if c > 0 else [0.0, 1.0, 0.0, 0.0]
-    ang = float(np.arctan2(s, c))
-    ax = axis / s
-    return [float(np.cos(ang / 2)), *(float(x) for x in (ax * np.sin(ang / 2)))]
 
 
 def dunk_entities() -> dict[str, EntityCfg]:
