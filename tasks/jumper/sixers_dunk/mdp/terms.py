@@ -164,6 +164,52 @@ def approach_ball(env: ManagerBasedRlEnv, sigma: float = 0.35,
     return torch.exp(-(d_xy / sigma) ** 2) * (d_hoop > leave_r).float()
 
 
+class BallToHoopProgress(ManagerTermBase):
+    """v10.5: per-step ball→hoop closing, gated on the claw touching the ball.
+
+    The answer to the operator's question of 2026-11-08: *"the claw taps the
+    ball, it rolls away, and there is no camera — how does the robot keep
+    pushing?"* A cone on distance (v9's `carry_to_hoop`) does get the robot
+    back to a lost ball — `ball_rel_pos`/`hoop_rel_pos` are fed to the policy
+    as observations directly, no vision needed — but a cone cannot tell a
+    **controlled push** from a kick that happens to land well. This term pays
+    the ball's own velocity component toward the hoop, one step at a time,
+    and only while a jaw is on it: kick it and the reward goes silent, walk
+    it and every 12 mm of the 1.2 m trip pays a full step. That is the
+    dense gradient the bulldozer skill needs, and it is the stage-2 term now
+    — `carry_to_hoop`'s cone stays as the coarser "arrive with it" shaping.
+
+    Same per-env state discipline as `BallProgress`: the step after any reset
+    returns 0 so the placement teleport cannot be farmed.
+    """
+
+    def __init__(self, cfg, env: ManagerBasedRlEnv):
+        super().__init__(env)
+        params = getattr(cfg, "params", {}) or {}
+        self.v_full = float(params.get("v_full", 0.12))
+        self._prev = None
+
+    def reset(self, env_ids):
+        if self._prev is None:
+            return
+        if env_ids is None or isinstance(env_ids, slice):
+            self._prev[:] = float("nan")
+        else:
+            self._prev[env_ids] = float("nan")
+
+    def __call__(self, env: ManagerBasedRlEnv, sensor_name: str =
+                 "claw_ball_contact", **_params) -> torch.Tensor:
+        b, h = _ball_pos(env), _hoop_pos(env)
+        d = torch.linalg.norm(b[:, :2] - h[:, :2], dim=1)
+        if self._prev is None:
+            self._prev = d.clone()
+            return torch.zeros_like(d)
+        gain = ((self._prev - d) / self.v_full).clamp(0.0, 1.0)
+        gain = torch.where(self._prev.isnan(), torch.zeros_like(gain), gain)
+        self._prev = d
+        return gain * _claw_touch(env, sensor_name).float()
+
+
 def ball_lifted(env: ManagerBasedRlEnv, cap: float = 0.12) -> torch.Tensor:
     """Ball height above rest, capped: reward *how high the object came*, a
     proxy for 'the grip held'. Beyond `cap` it is a fling, not a carry."""
