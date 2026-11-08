@@ -69,6 +69,22 @@ def _robot_pos(env: ManagerBasedRlEnv) -> torch.Tensor:
     return env.scene["robot"].data.root_link_pose_w[:, :3]
 
 
+def _claw_touch(env: ManagerBasedRlEnv, sensor_name: str) -> torch.Tensor:
+    """[B] bool: any jaw geom of the carried claw is touching the ball.
+
+    v9's answer to eight runs of evidence that the **pinch is not this
+    claw's way with a floor-level ball**: the palm hangs ~40 mm off the
+    ground (`five_foot/env_cfg.py` says so outright) while a 64 mm ball's
+    centre sits at 32 mm, so contact happens on the under-jaw, not across
+    the mouth, and the lift reward never left chance level. The task
+    therefore accepts the mechanic the hardware actually offers —
+    **bulldozing**: the claw face presses the ball and walks it. This
+    sensor is what says the walk is *controlled* and not a kick.
+    """
+    found = env.scene[sensor_name].data.found
+    return found.abs().sum(dim=tuple(range(1, found.dim()))) > 0
+
+
 # ── observations ─────────────────────────────────────────────────────────────
 
 
@@ -133,12 +149,19 @@ class BallProgress(ManagerTermBase):
 # ── rewards ──────────────────────────────────────────────────────────────────
 
 
-def approach_ball(env: ManagerBasedRlEnv, sigma: float = 0.35) -> torch.Tensor:
-    """ exp(−d²/σ²) on the horizontal claw→ball distance, killed once the
-    ball is off the ground (stage 1 stops paying when stage 2 has begun)."""
+def approach_ball(env: ManagerBasedRlEnv, sigma: float = 0.35,
+                  leave_r: float = 0.30) -> torch.Tensor:
+    """ exp(−d²/σ²) on the horizontal claw→ball distance.
+
+    v9 kill switch: stops paying once the ball is *near the hoop* (closer
+    than `leave_r`), handing the distance budget over to `carry_to_hoop`
+    so a parked ball at the box cannot feed stage 1 forever. (v6-v8's
+    `~lifted` switch never fired — the pinch lift never happened; see
+    `_claw_touch` for why the task stopped waiting for it.)
+    """
     d_xy = torch.linalg.norm(_ball_pos(env)[:, :2] - _robot_pos(env)[:, :2], dim=1)
-    lifted = _ball_lift(env) > 0.02
-    return torch.exp(-(d_xy / sigma) ** 2) * (~lifted).float()
+    d_hoop = torch.linalg.norm(_ball_pos(env)[:, :2] - _hoop_pos(env)[:, :2], dim=1)
+    return torch.exp(-(d_xy / sigma) ** 2) * (d_hoop > leave_r).float()
 
 
 def ball_lifted(env: ManagerBasedRlEnv, cap: float = 0.12) -> torch.Tensor:
@@ -149,19 +172,25 @@ def ball_lifted(env: ManagerBasedRlEnv, cap: float = 0.12) -> torch.Tensor:
 
 
 def carry_to_hoop(env: ManagerBasedRlEnv, sigma: float = 0.35,
-                  gate: str = "lift") -> torch.Tensor:
+                  gate: str = "contact",
+                  sensor_name: str = "claw_ball_contact") -> torch.Tensor:
     """Same shaping as approach, but ball→hoop.
 
-    gate="grip" (v7, what env_cfg wires): the ball counts as carried only
-    while it is **off the floor and the aperture is shut** — a flicked or
-    rolled ball must not unlock the third stage. gate="lift" is the v6
-    behaviour, kept for replaying older checkpoints.
+    gate="contact" (v9, what env_cfg wires): the ball counts as carried only
+    while a jaw is **touching it** — the claw bulldozing the ball across the
+    floor is this machine's actual carry, and a ball that was kicked and
+    rolls free must not unlock the stage. gate="grip" is the v7 behaviour
+    (off-floor + shut aperture) and gate="lift" the v6 one, both kept only
+    so old checkpoints replay with the terms they were trained on.
     """
     d = torch.linalg.norm(_ball_pos(env) - _hoop_pos(env), dim=1)
-    lifted = _ball_lift(env) > 0.02
-    if gate == "grip":
-        lifted = lifted & (_aperture(env) > _SHUT_APERTURE)
-    return torch.exp(-(d / sigma) ** 2) * lifted.float()
+    if gate == "contact":
+        held = _claw_touch(env, sensor_name)
+    else:
+        held = _ball_lift(env) > 0.02
+        if gate == "grip":
+            held = held & (_aperture(env) > _SHUT_APERTURE)
+    return torch.exp(-(d / sigma) ** 2) * held.float()
 
 
 def ball_in_hoop(env: ManagerBasedRlEnv, rim_h: float = 0.06) -> torch.Tensor:
