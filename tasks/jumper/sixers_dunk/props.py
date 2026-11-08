@@ -35,10 +35,20 @@ from ..five_foot.objects import (
     PROP_SOLREF,
 )
 
-#: Ball: a junior-sized leather ball the claw can actually close on. The
-#: official game ball (0.624 kg) is out of the claw's measured grip budget at
-#: stage 1; mass is set by density over the sphere volume below.
-BALL_R = 0.075
+#: Ball: **scaled to the claw's measured mouth, not to a real basketball.**
+#: `five_foot/claw.py` measures the jaw aperture across the pinch at 73.3 mm
+#: at `GRIPPER_OPEN` (-0.65), 82.6 mm at the widest usable -0.75, and authors
+#: its largest grippable prop — a 58 mm can — 15 mm inside that. v1-v7 ran a
+#: 150 mm ball: the pinch was **physically impossible**, which is why
+#: `ball_lifted` sat at chance level no matter what the policy or the action
+#: space tried. 56 mm diameter sits exactly on the can's documented budget,
+#: and at the robot's ~40 cm scale it still reads as a toy basketball on
+#: video. **v9: 64 mm.** v8 proved a 56 mm ball rolls out from under the palm
+#: before the jaws reach it — the smallest pushable prop the official table
+#: lists is 66 mm across, so the ball is set just inside that: still a hair
+#: under the pinch envelope (73 mm at `GRIPPER_OPEN`) for any future grip
+#: attempt, and big enough that the palm face meets it, not the floor.
+BALL_R = 0.032
 #: v3: was (0.55, -0.20) — d=0.585 m put the high-value region too far for
 # the entropy budget to bump into it by iteration ~900 (v2 measurement).
 # 0.43 m now: still a walk, reachable by a exploring policy within its first
@@ -49,14 +59,24 @@ BALL_R = 0.075
 # *touched* to learn from. The ball now spawns 0.19 m ahead: inside the first
 # flail's reach. Combined with the sharpened cone below, guarding the ball
 # becomes the new (intended) comfort zone, and progress/lift unlock outward.
-BALL_X, BALL_Y = 0.18, -0.05
-BALL_MASS = 0.16
+#: v9: dead ahead at 0.20 m. v8's y=-0.05 only taught the policy to flank the
+# ball; a bulldozer drives straight, and so does the claw-palm here.
+BALL_X, BALL_Y = 0.20, -0.02
+#: 30 g — a superball. Held across two jaws at mu_s 0.35 the pinch needs only
+#: N >= mg / 2mu ~= 0.42 N, and the actuator tops out at `STIFFNESS *
+#: SQUEEZE_LEAD` = 0.6 N·m at the fingertip — the grip has room to spare.
+#: (The 160 g of v1-v7 was sized for the old 150 mm ball.)
+BALL_MASS = 0.03
 #: leather orange, the same hue as the arena-map ball so the finished video
 #: reads as one object across simulator and replay.
 BALL_RGBA = (0.82, 0.33, 0.10, 1.0)
 
 HOOP_X, HOOP_Y = 1.45, 0.35
-HOOP_INNER = round(2.0 * BALL_R + 0.010, 3)   # 0.160 — one ball + margins
+#: Three balls across, not one: the release is a blind drop off an open claw
+#: from a few centimetres up, and a one-ball box would bounce most near-misses
+#: back out — the score must measure "got it to the hoop", not pinball luck.
+#: (v1-v7: this derived 0.160 for the old 150 mm ball and never got used.)
+HOOP_INNER = round(3.5 * BALL_R + 0.010, 3)   # 0.108 — ~2 ball-widths across
 HOOP_WALL_T, HOOP_RIM_H = 0.006, 0.020
 HOOP_RGBA = (0.0, 0.302, 0.596, 1.0)          # Sixers blue #004D98
 
