@@ -53,7 +53,16 @@ from ..five_foot.objects import (
 #: lists is 66 mm across, so the ball is set just inside that: still a hair
 #: under the pinch envelope (73 mm at `GRIPPER_OPEN`) for any future grip
 #: attempt, and big enough that the palm face meets it, not the floor.
-BALL_R = 0.032
+#: **v10.5 (operator review, 2026-11-08): 80 mm.** Two reasons beyond "the
+#: box is hard to enter": a bigger ball rolls over the sill with a smaller
+#: push (step-climb force ~ sqrt(2Rh)/(R−h) × mg, and R is now 3× the sill
+#: step), and its **equator sits at 40 mm — exactly the height the stowed
+#: palm hangs at**. At 64 mm the mouth could only ever be *under* the ball;
+#: at 80 mm the jaws can be across its sides, so the pinch is back within
+#: reach as an emergent skill, not just the shove. The claw opens past 80 mm
+#: only at finger < -0.75 (measured 82.3 mm at -0.75 in `claw.py`), which
+#: the v7 finger action covers — the policy has to *choose* to pre-open.
+BALL_R = 0.040
 #: v3: was (0.55, -0.20) — d=0.585 m put the high-value region too far for
 # the entropy budget to bump into it by iteration ~900 (v2 measurement).
 # 0.43 m now: still a walk, reachable by a exploring policy within its first
@@ -86,7 +95,7 @@ HOOP_X, HOOP_Y = 1.20, 0.30
 #: from a few centimetres up, and a one-ball box would bounce most near-misses
 #: back out — the score must measure "got it to the hoop", not pinball luck.
 #: (v1-v7: this derived 0.160 for the old 150 mm ball and never got used.)
-HOOP_INNER = round(3.5 * BALL_R + 0.010, 3)   # 0.118 — ~2 ball-widths across
+HOOP_INNER = round(2.75 * BALL_R + 0.010, 3)   # 0.120 — ~1.5 ball-widths across
 #: v10 (operator review): the post/arm/backboard/rim stand is **gone** — ten
 #: runs proved the claw cannot get the ball off the floor at all, so nothing
 #: overhead was ever part of the task. The box takes the whole role, and the
@@ -95,7 +104,10 @@ HOOP_INNER = round(3.5 * BALL_R + 0.010, 3)   # 0.118 — ~2 ball-widths across
 #: fraction of its radius (32 mm), so a full-height near wall would make the
 #: box a monument, not a target. Enter over the sill, ringed by high walls.
 HOOP_WALL_T, HOOP_RIM_H = 0.006, 0.035
-HOOP_SILL_H = 0.008   # the approach-side wall, kept climbable
+#: v10.5: sill 8 -> 6 mm with the bigger ball — the entrance step is now
+#: 12 mm total (floor + sill) against a 40 mm radius: a push the walk easily
+#: produces, not a wall.
+HOOP_SILL_H = 0.006   # the approach-side wall, kept climbable
 HOOP_RGBA = (0.0, 0.302, 0.596, 1.0)          # Sixers blue #004D98
 
 
