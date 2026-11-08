@@ -39,8 +39,9 @@ from mjlab.managers.observation_manager import ObservationTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 
 from ..five_foot.env_cfg import env_cfg as _five_foot_env_cfg
-from .mdp.terms import (BallProgress, approach_ball, ball_in_hoop, ball_lifted,
-                        carry_to_hoop, hoop_rel_pos, ball_rel_pos)
+from .mdp.terms import (BallProgress, BallToHoopProgress, approach_ball,
+                        ball_in_hoop, ball_lifted, carry_to_hoop, hoop_rel_pos,
+                        ball_rel_pos)
 from ..five_foot.claw import FINGER_JOINT, GRIPPER_CLOSED, GRIPPER_OPEN
 from ..five_foot.env_cfg import FIVE_FOOT_JOINTS
 from .props import HOOP_RIM_H, dunk_entities
@@ -211,6 +212,15 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
         func=carry_to_hoop, weight=6.0,
         params={"sigma": 0.50, "gate": "contact",
                 "sensor_name": "claw_ball_contact"})   # v9: bulldoze carry
+    # v10.5: the dense half of stage 2. `carry_to_hoop`'s cone says "be near
+    # the hoop with the ball"; this says "the ball is CLOSING on the hoop
+    # right now, under jaw contact" — the per-step push a bulldozer actually
+    # performs, and the term that answers the operator's "the ball rolls away
+    # and there is no camera" objection (the policy reads ball_rel_pos /
+    # hoop_rel_pos directly as observations; vision is not required).
+    cfg.rewards["hoop_progress"] = RewardTermCfg(
+        func=BallToHoopProgress, weight=6.0,
+        params={"v_full": 0.12, "sensor_name": "claw_ball_contact"})
     cfg.rewards["ball_in_hoop"] = RewardTermCfg(
         func=ball_in_hoop, weight=15.0, params={"rim_h": HOOP_RIM_H + 0.04})
 
@@ -228,6 +238,15 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
                     "feet_planted", "five_foot_gait"):
         if comfort in cfg.rewards:
             cfg.rewards[comfort].weight = 0.0
+    # v10.5 (operator question of 2026-11-08: "why is the second pair of feet
+    # always off the ground?"): zeroing `feet_planted` removed *all* pressure
+    # on stance quality, and the policy found a comfortable three-legged lean
+    # it keeps in replay. Bring it back at a **fraction** of five_foot's full
+    # weight — enough to charge the weird stance, not enough to rebuild the
+    # standing-comfort sinkhole (five_foot's full weight made standing worth
+    # ~5/step, which is what starved the dunk stages in v1-v4).
+    if "feet_planted" in cfg.rewards:
+        cfg.rewards["feet_planted"].weight = 1.5
 
 
     # ── fixed spawn ──
