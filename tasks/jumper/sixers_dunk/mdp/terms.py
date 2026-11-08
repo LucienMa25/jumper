@@ -240,12 +240,16 @@ def carry_to_hoop(env: ManagerBasedRlEnv, sigma: float = 0.35,
 
 
 def ball_in_hoop(env: ManagerBasedRlEnv, rim_h: float = 0.06) -> torch.Tensor:
-    """The score. 1 while the ball centre is inside the rim footprint and
-    below the rim line — holding it over the hoop is `carry_to_hoop`'s job;
-    this only fires on a release into the tray. Settle in the tray keeps the
-    reward alive until termination, so per-step weights stay small."""
+    """The score. 1 while the ball centre is inside the **cup radius** — v11
+    made the target circular, so the footprint test is a norm, not a square
+    — and below the wall line. (v11 note: with the cup floor 12 mm and the
+    wall top 41 mm off the ground, `rim_h` comfortably above the walls means
+    "in the cup" is decided by the horizontal test alone; the height test
+    only rejects a ball that somehow ends up airborne over the rim.)
+    Holding it beside the cup is `carry_to_hoop`'s job; this fires once the
+    ball is sunk. Settle in the cup keeps the reward alive until
+    termination, so per-step weights stay small."""
     b, h = _ball_pos(env), _hoop_pos(env)
-    inside = (torch.abs(b[:, 0] - h[:, 0]) < HOOP_INNER) \
-        & (torch.abs(b[:, 1] - h[:, 1]) < HOOP_INNER)
+    inside = torch.linalg.norm(b[:, :2] - h[:, :2], dim=1) < HOOP_INNER
     under_rim = _ball_lift(env) < rim_h
     return (inside & under_rim).float()
