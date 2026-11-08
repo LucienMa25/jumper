@@ -41,6 +41,8 @@ from mjlab.managers.reward_manager import RewardTermCfg
 from ..five_foot.env_cfg import env_cfg as _five_foot_env_cfg
 from .mdp.terms import (BallProgress, approach_ball, ball_in_hoop, ball_lifted,
                         carry_to_hoop, hoop_rel_pos, ball_rel_pos)
+from ..five_foot.claw import FINGER_JOINT, GRIPPER_CLOSED, GRIPPER_OPEN
+from ..five_foot.env_cfg import FIVE_FOOT_JOINTS
 from .props import HOOP_RIM_H, dunk_entities
 
 
@@ -49,6 +51,10 @@ def env_cfg(
     play: bool = False,
     hoop: bool = False,
 ):
+    # five_foot is the locomotion base -- the five grounded legs, the stowed
+    # arm, the walk-timeout termination. Its *claw is re-opened to the policy*
+    # just below (v7), and the flat skeleton's 20-joint gait set stays intact
+    # except for the carried arm, exactly as five_foot grounds it.
     cfg = _five_foot_env_cfg(asset=asset, play=play)   # objects=False
     if hoop:
         _apply_hoop_world(cfg, play=play)
@@ -73,6 +79,30 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
     if clash:
         raise ValueError(f"--hoop would overwrite existing entities {clash}")
     entities.update(dunk_entities())
+
+    # ── v7: the finger joins the action ──────────────────────────────────
+    # v6 saturated the approach cone (6.5/8 standing over the ball) while
+    # `ball_lifted` sat at luck-level 0.011: the policy could not close the
+    # claw. five_foot keeps LF_J4 out of the action because *its* policy was
+    # never rewarded for what it does with it and its checkpoints predate the
+    # idea; dunk reverses that judgement by its own contract -- lift, carry
+    # and score all require a held ball, so the finger is the task's terminal
+    # effector and the network must own it.
+    # Mapping, calibrated on the probe (2026-11-07): the position action sweeps
+    # `center + scale*action` with the center at the asset default GRIPPER_OPEN
+    # (-0.65 measured: action 0 sits the finger open, +1 at scale 0.375 only
+    # reached -0.27). scale = the full 0.75 travel closes exactly onto
+    # GRIPPER_CLOSED at action +1 and opens toward the joint's own -1.6 at -1
+    # (harmless: past -0.75 there is no wider mouth, `claw.py` measured that
+    # wide-open pinches props out -- the policy learns not to camp there).
+    # The action column order is the model's actuator order, LF_J4 first --
+    # the MLP is permutation-agnostic, and the contract records the order from
+    # the env, so export reads it as trained.
+    action = cfg.actions["joint_pos"]
+    action.actuator_names = list(action.actuator_names) + [FINGER_JOINT]
+    action.scale = {**action.scale, FINGER_JOINT: GRIPPER_CLOSED - GRIPPER_OPEN}
+    action.offset = {**(action.offset if isinstance(action.offset, dict) else {}),
+                     FINGER_JOINT: 0.0}
 
     # ── drop the payload curriculum (v3, measured on the v2 run, 2026-11-05) ──
     # five_foot's payload ladder promotes when "the policy tracks the top
@@ -141,7 +171,8 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
     cfg.rewards["ball_lifted"] = RewardTermCfg(
         func=ball_lifted, weight=4.0, params={"cap": 0.12})
     cfg.rewards["carry_to_hoop"] = RewardTermCfg(
-        func=carry_to_hoop, weight=3.0, params={"sigma": 0.50})
+        func=carry_to_hoop, weight=3.0,
+        params={"sigma": 0.50, "gate": "grip"})   # v7: a gripped ball only
     cfg.rewards["ball_in_hoop"] = RewardTermCfg(
         func=ball_in_hoop, weight=15.0, params={"rim_h": HOOP_RIM_H + 0.04})
 
