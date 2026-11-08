@@ -39,12 +39,12 @@ from mjlab.managers.observation_manager import ObservationTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 
 from ..five_foot.env_cfg import env_cfg as _five_foot_env_cfg
-from .mdp.terms import (BallProgress, BallToHoopProgress, approach_ball,
-                        ball_in_hoop, ball_lifted, carry_to_hoop, hoop_rel_pos,
-                        ball_rel_pos)
+from .mdp.terms import (BALL_SENSORS, BallProgress, BallToHoopProgress,
+                        approach_ball, ball_in_hoop, ball_lifted, ball_score_count,
+                        carry_to_hoop, hoop_rel_pos, ball_rel_pos)
 from ..five_foot.claw import FINGER_JOINT, GRIPPER_CLOSED, GRIPPER_OPEN
 from ..five_foot.env_cfg import FIVE_FOOT_JOINTS
-from .props import HOOP_RIM_H, dunk_entities
+from .props import BALL_NAMES, CUP_NAMES, dunk_entities
 
 
 def env_cfg(
@@ -63,8 +63,6 @@ def env_cfg(
 
 
 def _apply_hoop_world(cfg, *, play: bool) -> None:
-    from .props import HOOP_X, HOOP_Y, BALL_X, BALL_Y
-
     # ── physics capacity and the prop friction model (five_foot's, imported) ──
     from ..five_foot.objects import (
         OBJECTS_NCONMAX, OBJECTS_NJMAX, PROP_CONE, PROP_IMPRATIO,
@@ -76,7 +74,7 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
 
     # ── entities ──
     entities = cfg.scene.entities
-    clash = sorted({"dunk_ball", "dunk_hoop"} & set(entities))
+    clash = sorted((set(BALL_NAMES) | set(CUP_NAMES)) & set(entities))
     if clash:
         raise ValueError(f"--hoop would overwrite existing entities {clash}")
     entities.update(dunk_entities())
@@ -131,7 +129,7 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
     from mjlab.managers.event_manager import EventTermCfg
     from mjlab.managers.scene_entity_config import SceneEntityCfg
 
-    for name in ("dunk_ball", "dunk_hoop"):
+    for name in (*BALL_NAMES, *CUP_NAMES):
         cfg.events[f"reset_prop_{name}"] = EventTermCfg(
             func=mdp_events.reset_root_state_uniform,
             mode="reset",
@@ -139,31 +137,31 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
                     "asset_cfg": SceneEntityCfg(name)},
         )
 
-    # ── v9: the claw→ball contact sensor ─────────────────────────────────
+    # ── v9/v12: one claw→ball contact sensor per ball ─────────────
     # Eight runs (v1-v8) settled it: this claw does not pinch a floor-level
     # ball. `five_foot/env_cfg.py` states the geometry outright — the stowed
-    # claw hangs **40 mm off the floor** — and the ball's centre is 32 mm,
-    # so the jaws can never be across it; every contact is the under-jaw
+    # claw hangs **40 mm off the floor** — so every contact is the under-jaw
     # shoving the ball along the ground. Rather than keep paying a `lift`
-    # term the hardware cannot collect, the task now rewards that shove as
-    # the carry: `carry_to_hoop` gates on jaw-on-ball contact, and a ball
-    # that was kicked and rolls free earns nothing. `GRIP_GEOMS` is exactly
-    # the four jaw faces plus their convex pieces; the secondary is the
-    # ball's single geom.
+    # term the hardware cannot collect, the task rewards that shove as the
+    # carry: stage 2 gates on jaw-on-ball contact, and a ball that was
+    # kicked and rolls free earns nothing. `GRIP_GEOMS` is exactly the four
+    # jaw faces plus their convex pieces; the secondary is each ball's own
+    # geom, scoped through its entity (`dunk_ball_i/dunk_ball`).
     from mjlab.sensor import ContactMatch, ContactSensorCfg
     from ..five_foot.jaws import GRIP_GEOMS
 
-    claw_ball = ContactSensorCfg(
-        name="claw_ball_contact",
-        primary=ContactMatch(mode="geom", pattern=GRIP_GEOMS, entity="robot"),
-        secondary=ContactMatch(mode="geom", pattern="dunk_ball",
-                               entity="dunk_ball"),
-        fields=("found",),
-        reduce="none",
-        num_slots=1,
-        history_length=cfg.decimation,
-    )
-    cfg.scene.sensors = (cfg.scene.sensors or ()) + (claw_ball,)
+    for ball, sensor in zip(BALL_NAMES, BALL_SENSORS):
+        claw_ball = ContactSensorCfg(
+            name=sensor,
+            primary=ContactMatch(mode="geom", pattern=GRIP_GEOMS, entity="robot"),
+            secondary=ContactMatch(mode="geom", pattern="dunk_ball",
+                                   entity=ball),
+            fields=("found",),
+            reduce="none",
+            num_slots=1,
+            history_length=cfg.decimation,
+        )
+        cfg.scene.sensors = (cfg.scene.sensors or ()) + (claw_ball,)
 
 
     # ── observations: both groups see the world they must act on ──
@@ -171,6 +169,10 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
         terms = cfg.observations[group].terms
         terms["ball_rel_pos"] = ObservationTermCfg(func=ball_rel_pos)
         terms["hoop_rel_pos"] = ObservationTermCfg(func=hoop_rel_pos)
+        # v12: which of the three balls are already in, so the critic can
+        # value a finished green (and the policy is never blind-sided by
+        # the target switching when one sinks).
+        terms["ball_score_count"] = ObservationTermCfg(func=ball_score_count)
 
     # ── staged rewards ──
     # The weights are this task's decision, and the first run measured why:
@@ -210,8 +212,7 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
         func=ball_lifted, weight=0.0, params={"cap": 0.12})
     cfg.rewards["carry_to_hoop"] = RewardTermCfg(
         func=carry_to_hoop, weight=6.0,
-        params={"sigma": 0.50, "gate": "contact",
-                "sensor_name": "claw_ball_contact"})   # v9: bulldoze carry
+        params={"sigma": 0.50})   # v12: gates on touching the TARGET ball
     # v10.5: the dense half of stage 2. `carry_to_hoop`'s cone says "be near
     # the hoop with the ball"; this says "the ball is CLOSING on the hoop
     # right now, under jaw contact" — the per-step push a bulldozer actually
@@ -219,10 +220,9 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
     # and there is no camera" objection (the policy reads ball_rel_pos /
     # hoop_rel_pos directly as observations; vision is not required).
     cfg.rewards["hoop_progress"] = RewardTermCfg(
-        func=BallToHoopProgress, weight=6.0,
-        params={"v_full": 0.12, "sensor_name": "claw_ball_contact"})
+        func=BallToHoopProgress, weight=6.0, params={"v_full": 0.12})
     cfg.rewards["ball_in_hoop"] = RewardTermCfg(
-        func=ball_in_hoop, weight=15.0, params={"rim_h": HOOP_RIM_H + 0.04})
+        func=ball_in_hoop, weight=15.0)
 
     # ── v5: zero the standing-comfort terms ────────────────────────────────
     # v4's curve (2026-11-07, 4090D, 4000 iters) ended exactly at the
@@ -263,6 +263,14 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
     pose["y"] = (0.0, 0.0)
     pose["yaw"] = (0.0, 0.0)
     reset.params["pose_range"] = pose
+
+    # ── v12: a three-station round needs a longer clock ──
+    # one sink is a 0.6–0.9 m push plus a 0.8–1.3 m run to the next firing
+    # position; five_foot's 20 s episode ends barely past the first green.
+    # 45 s fits a full round with room for one recovery; replay keeps
+    # five_foot's own unpinned clock (and `play` already raised it to 1e9).
+    if not play:
+        cfg.episode_length_s = 45.0
 
     # ── neutral commands: TRAINING ONLY ──
     # With the sampled command pinned at rest, the base tracking reward is
