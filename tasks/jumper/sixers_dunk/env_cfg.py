@@ -143,17 +143,24 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
     # claw hangs **40 mm off the floor** — so every contact is the under-jaw
     # shoving the ball along the ground. Rather than keep paying a `lift`
     # term the hardware cannot collect, the task rewards that shove as the
-    # carry: stage 2 gates on jaw-on-ball contact, and a ball that was
-    # kicked and rolls free earns nothing. `GRIP_GEOMS` is exactly the four
-    # jaw faces plus their convex pieces; the secondary is each ball's own
-    # geom, scoped through its entity (`dunk_ball_i/dunk_ball`).
+    # carry: stage 2 gates on body-on-ball contact, and a ball that was
+    # kicked and rolls free earns nothing. The primary is the whole robot
+    # subtree — see the v12.2 note below for why not just the jaws.
     from mjlab.sensor import ContactMatch, ContactSensorCfg
-    from ..five_foot.jaws import GRIP_GEOMS
 
+    # v12.2 (4000-iteration log, 2026-11-09): the jaw-only gate never fired.
+    # `ball_in_hoop` grew a nonzero tail while `hoop_progress` sat at 0.0002:
+    # the robot does bulldoze the ball — with its **whole front body**, not
+    # the 40 mm-high palm. The gate therefore watches any robot geom on any
+    # ball (`subtree` from `base_link`, the dance task's pattern), and the
+    # control discipline moves to where it can bite: `hoop_progress` only
+    # pays while the contact is ON and the ball is CLOSING, so a kicked ball
+    # rolling free still earns nothing.
     for ball, sensor in zip(BALL_NAMES, BALL_SENSORS):
         claw_ball = ContactSensorCfg(
             name=sensor,
-            primary=ContactMatch(mode="geom", pattern=GRIP_GEOMS, entity="robot"),
+            primary=ContactMatch(mode="subtree", pattern="base_link",
+                                 entity="robot"),
             secondary=ContactMatch(mode="geom", pattern="dunk_ball",
                                    entity=ball),
             fields=("found",),
