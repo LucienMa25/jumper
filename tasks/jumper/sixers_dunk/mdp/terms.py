@@ -285,9 +285,15 @@ class BallToHoopProgress(_TargetProgress):
         c = _pick(_cups_pos(env), idx)
         return torch.linalg.norm(b[:, :2] - c[:, :2], dim=1)
 
-    def gate(self, env, idx, active):
-        touch = _pick(_touches(env), idx)
-        return (active & touch).float()
+    # v12.3: gate is contact-free (the inherited `active` only). Twelve runs
+    # proved the claw→ball contact sensor never fires reliably — the jaw-only
+    # gate (v12.1) and the whole-robot subtree gate (v12.2) BOTH left
+    # `hoop_progress` pinned at ~0.0002 and collapsed survival. The dense
+    # signal that always works is geometry: the target ball CLOSING on its
+    # own cup. v12.1 already sank balls by body-bulldoze with no dense reward
+    # at all, so paying pure closing accelerates exactly the useful motion.
+    # A ball that merely rolls toward the cup earning a little is acceptable
+    # too — to score it must still end up INSIDE the cup (`delivered_mask`).
 
 
 # ── rewards ──────────────────────────────────────────────────────────────────
@@ -308,8 +314,11 @@ def approach_ball(env: ManagerBasedRlEnv, sigma: float = 0.35,
     c = _pick(_cups_pos(env), idx)
     d_xy = torch.linalg.norm(b[:, :2] - _robot_pos(env)[:, :2], dim=1)
     near_hoop = torch.linalg.norm(b[:, :2] - c[:, :2], dim=1) <= leave_r
-    walking = _pick(_touches(env), idx)
-    return torch.exp(-(d_xy / sigma) ** 2) * (active & ~near_hoop & ~walking).float()
+    # v12.3: dropped the `~walking` switch. With the contact sensor never
+    # firing, that gate only made approach flicker against a half-broken
+    # signal; leaving stage 1 always-on until the ball is near the cup is
+    # what v12.1 did and it reached ball_in_hoop 0.08 avg / 2.24 peak.
+    return torch.exp(-(d_xy / sigma) ** 2) * (active & ~near_hoop).float()
 
 
 def ball_lifted(env: ManagerBasedRlEnv, cap: float = 0.12) -> torch.Tensor:
@@ -333,8 +342,9 @@ def carry_to_hoop(env: ManagerBasedRlEnv, sigma: float = 0.35) -> torch.Tensor:
     b = _pick(_balls_pos(env), idx)
     c = _pick(_cups_pos(env), idx)
     d = torch.linalg.norm(b - c, dim=1)
-    held = _pick(_touches(env), idx)
-    return torch.exp(-(d / sigma) ** 2) * (active & held).float()
+    # v12.3: contact gate removed (see BallToHoopProgress) — the cone pays on
+    # target-ball proximity to its own cup, no sensor in the loop.
+    return torch.exp(-(d / sigma) ** 2) * active.float()
 
 
 def ball_in_hoop(env: ManagerBasedRlEnv) -> torch.Tensor:
