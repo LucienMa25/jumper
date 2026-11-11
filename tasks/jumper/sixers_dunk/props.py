@@ -89,7 +89,18 @@ BALL_R = 0.040
 #: cup (every cross distance stays above `SCORE_R` + ball radius once the
 #: ball is short of its own mouth).
 BALLS_XY: tuple[tuple[float, float], ...] = (
-    (0.35, -0.35),      # station 0: right of centre, the short shot
+    (0.25, -0.02),      # station 0: right of centre, the short shot
+    # **v12.4 (test-drive of model_500/1000/1500, 2026-11-11): 0.35/−0.35 →
+    # 0.25/−0.02, the ignition move.** The checkpoints walk *toward* the
+    # ball and stall at ~0.44 m — the first touch that starts the whole
+    # stage-2 economy never happens in the deterministic policy's range.
+    # Ball 0 now sits dead ahead within a flail's reach so the first paid
+    # push lands inside the first few hundred updates. (The v10 "spawn in
+    # the cone and it parks" trap does not apply here: parked pays no
+    # `hoop_progress` — the BALL has to move — and the per-footfall
+    # walking tax that actually caused the stall, `feet_still`, is zeroed
+    # in env_cfg's v12.4 note.) Stations 1 and 2 stay across the court:
+    # by then the skill exists and only the run between stations matters.
     (0.50,  0.55),      # station 1: far left, reached after the first sink
     (0.95,  0.05),      # station 2: centre, the deep one up the fairway
 )
