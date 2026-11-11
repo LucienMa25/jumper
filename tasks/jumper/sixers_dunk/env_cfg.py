@@ -242,9 +242,19 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
     # The safety floor stays: upright/pose/dof limits/self-collision still
     # penalise falling and flailing; `fell_over` still terminates.
     for comfort in ("track_linear_velocity", "track_angular_velocity",
-                    "feet_planted", "five_foot_gait"):
+                    "feet_planted", "five_foot_gait", "feet_still"):
         if comfort in cfg.rewards:
             cfg.rewards[comfort].weight = 0.0
+    # v12.4: `feet_still` joins the zeroed family. The test-drive of the
+    # v12.3 checkpoints showed the deterministic policy walking *toward* the
+    # ball and stopping dead at ~0.44 m, and the arithmetic says why: its
+    # −2.0 charge fires on **every step that is not planted**, so walking
+    # the fairway cost ~2.7/step against an approach cone that pays for
+    # *being* near the ball, not moving. v5 zeroed the four tracking
+    # comfort terms and missed this one — it is the same trap, priced per
+    # footfall. The safety floor (tilt/height/limits/self-collision) is
+    # untouched: a robot that cannot afford to walk is exactly the failure
+    # those terms are for, and it will still show up there.
     # v10.5 (operator question of 2026-11-08: "why is the second pair of feet
     # always off the ground?"): zeroing `feet_planted` removed *all* pressure
     # on stance quality, and the policy found a comfortable three-legged lean
