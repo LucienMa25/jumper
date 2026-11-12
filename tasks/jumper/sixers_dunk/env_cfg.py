@@ -265,6 +265,26 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
     if "feet_planted" in cfg.rewards:
         cfg.rewards["feet_planted"].weight = 1.5
 
+    # ── v12.5: `too_low` must not execute the only posture that reaches the
+    # ball ───────────────────────────────────────────────────────────────
+    # The v12.4 run (Colab, 2377 iterations) finally lit the geometry gate —
+    # `hoop_progress` held 0.005–0.009 for the first time and the ball was
+    # seen in the cup at moments — and then showed what was still killing
+    # it: `Episode_Termination/too_low` ran at 1.3–2.0 per episode and the
+    # mean episode length fell from 2250 to ~470 steps. The crouch that
+    # brings the 40 mm-high claw down to an 80 mm ball's equator is the one
+    # body posture from which the push exists at all, and five_foot's
+    # belly-lying guard (`MIN_STAND_HEIGHT` = 0.05 m against a 0.106 m
+    # stance) sentences it as lying down. Five centimetres is a walking
+    # failure in a locomotion task; in THIS task it is the working pose.
+    # Drop the floor to 0.02 m: the crouch survives, a true collapse is
+    # still caught — sinking below 20 mm without a tilt change is
+    # physically implausible for this frame, and `fell_over` (50 deg of
+    # tilt) keeps the lying-on-the-side case exactly as five_foot means it.
+    from ..five_foot import env_cfg as _five_foot_mod
+    cfg.terminations["too_low"].params["minimum_height"] = min(
+        0.02, _five_foot_mod.MIN_STAND_HEIGHT)
+
 
     # ── fixed spawn ──
     # Pinned in train and replay alike: the ball and hoop sit at known env-
