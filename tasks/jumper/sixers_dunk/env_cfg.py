@@ -137,6 +137,24 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
                     "asset_cfg": SceneEntityCfg(name)},
         )
 
+    # ── v12.6: the ball guard (speed cap + NaN repair) ──────────────────
+    # v12.5 died at iteration 1701 on `check_nan` — a ball shoved into the
+    # cup's wall seam at warp substep frequencies can tunnel, the solver
+    # answers with an absurd velocity, and the NaN rides the observations
+    # into the hard stop. One `mode="step"` event per ball caps legit
+    # speeds (a bulldozed ball never passes ~1 m/s; the cap bites at 2.5)
+    # and soft-resets the ball in the rare environment that still goes
+    # non-finite, so one poisoned env costs its own steps instead of the
+    # whole run. See mdp/events.py for the arithmetic.
+    from .mdp.events import guard_ball
+
+    for ball in BALL_NAMES:
+        cfg.events[f"guard_{ball}"] = EventTermCfg(
+            func=guard_ball,
+            mode="step",
+            params={"asset_cfg": SceneEntityCfg(ball), "max_speed": 2.5},
+        )
+
     # ── v9/v12: one claw→ball contact sensor per ball ─────────────
     # Eight runs (v1-v8) settled it: this claw does not pinch a floor-level
     # ball. `five_foot/env_cfg.py` states the geometry outright — the stowed
