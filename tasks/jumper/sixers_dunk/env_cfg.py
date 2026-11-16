@@ -245,7 +245,23 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
     # and there is no camera" objection (the policy reads ball_rel_pos /
     # hoop_rel_pos directly as observations; vision is not required).
     cfg.rewards["hoop_progress"] = RewardTermCfg(
-        func=BallToHoopProgress, weight=6.0, params={"v_full": 0.12})
+        func=BallToHoopProgress, weight=12.0, params={"v_full": 0.06})
+    # **v12.7 (test-drive of model_1900/2700/3699, 2026-11-16): the push had
+    # to become the best-paying chair in the room, and it was not.** The
+    # deterministic policy walks to 0.19 m of the ball (approach ~0.9/step)
+    # and parks there: `d→cup` never moves off its 1.03 m spawn value in
+    # any of the three checkpoints. The arithmetic explains the habit —
+    # standing paid ~0.9/step and pushing paid 0.01–0.02 (hoop_progress at
+    # weight 6, v_full 0.12: a real 2 cm/step push is only 1/6 of a full
+    # tick, ~0.1/step at best, and the cone terms only pay once the ball is
+    # already mid-fairway). A rational policy hugs the ball and waits for
+    # exploration noise to push it (which is exactly what the training
+    # carry-0.6 spikes were). The fix prices the push itself: **12.0 weight
+    # at v_full 0.06 m/s** — a sustained 6 cm/step bulldoze now pays 12/step,
+    # ~13x parking, and a slower 2 cm/step still pays 4/step and beats
+    # parking. The idle-at-the-ball posture stops being a local optimum.
+    # (approach/carry keep their weights — the walk-to-ball skill they
+    # built is wanted; parking at the ball simply stops being profitable.)
     cfg.rewards["ball_in_hoop"] = RewardTermCfg(
         func=ball_in_hoop, weight=15.0)
 
@@ -322,10 +338,18 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
     # ── v12: a three-station round needs a longer clock ──
     # one sink is a 0.6–0.9 m push plus a 0.8–1.3 m run to the next firing
     # position; five_foot's 20 s episode ends barely past the first green.
-    # 45 s fits a full round with room for one recovery; replay keeps
-    # five_foot's own unpinned clock (and `play` already raised it to 1e9).
+    # **v12.7: 45 → 70 s.** The v12.6 run showed why 45 was still short:
+    # the first push (1.0 m fairway ≈ 25 s at a bulldozer's pace) plus the
+    # run to station 2 (~10 s) plus its own push (~15 s) already overruns
+    # the clock — balls 2 and 3 were *structurally* unreachable inside one
+    # episode, so `ball_in_hoop`'s 2/3 and 1/3 steps could never be
+    # experienced, and the policy had no gradient toward chaining shots.
+    # At 70 s a two-ball round fits and a three-ball round is close; the
+    # curriculum-free task can afford the longer credit assignment.
+    # replay keeps five_foot's own unpinned clock (and `play` already
+    # raised it to 1e9).
     if not play:
-        cfg.episode_length_s = 45.0
+        cfg.episode_length_s = 70.0
 
     # ── neutral commands: TRAINING ONLY ──
     # With the sampled command pinned at rest, the base tracking reward is
