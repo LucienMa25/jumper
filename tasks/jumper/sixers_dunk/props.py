@@ -215,6 +215,36 @@ def _hoop_spec(body_name: str = "dunk_hoop"):
     return spec
 
 
+def _yaw_quat(deg: float) -> tuple[float, float, float, float]:
+    """Body-frame +z rotation of `deg` as an (w, x, y, z) quaternion."""
+    import math
+    return (math.cos(math.radians(deg) / 2), 0.0, 0.0,
+            math.sin(math.radians(deg) / 2))
+
+
+def _mouth_yaw_deg(ball: tuple[float, float], cup: tuple[float, float]) -> float:
+    """Yaw that points the cup's mouth (authored at 180 deg) at its own ball.
+
+    **v12.9 (v12.8 events 5698→6497, 2026-11-17): the last millimetres were
+    a geometry bug of ours, not the policy's.** The economics reform worked
+    — `hoop_progress` rose 0.002 → 0.364 still climbing, `approach`'s hug
+    spike died (4.26 → 0.26), `carry` proves the ball arrives at the cup —
+    but `ball_in_hoop` stayed exactly 0.000 for the whole 800-iteration
+    segment. The reason: every stage-2 gradient points the ball at the cup
+    CENTRE, while the mouth — the only opening — was authored facing -x for
+    all three cups. Station 2's fairway (dead +x) lines up with it, but
+    stations 0/1 arrive at ±30 deg off: the ball presses the curved wall
+    beside the mouth and can only slide along it. Rotate each cup so its
+    mouth centres on the line from its own ball — then "push toward the cup
+    centre" IS "enter through the mouth", and no reward term has to know
+    about the gap. The yaw is derived from the layout (never hard-coded),
+    so moving a ball or a cup keeps its mouth aimed for free.
+    """
+    import math
+    dx, dy = ball[0] - cup[0], ball[1] - cup[1]
+    return math.degrees(math.atan2(dy, dx)) - 180.0
+
+
 def dunk_entities() -> dict[str, EntityCfg]:
     """The three balls and their three cups, at their scene positions
     (relative to each env origin, the way five_foot's row places its props).
@@ -232,7 +262,9 @@ def dunk_entities() -> dict[str, EntityCfg]:
     entities.update({
         name: EntityCfg(
             spec_fn=lambda n=name: _hoop_spec(n),
-            init_state=EntityCfg.InitialStateCfg(pos=(x, y, 0.0)))
-        for name, (x, y) in zip(CUP_NAMES, CUPS_XY)
+            init_state=EntityCfg.InitialStateCfg(
+                pos=(x, y, 0.0),
+                rot=_yaw_quat(_mouth_yaw_deg(ball, (x, y)))))
+        for name, (x, y), ball in zip(CUP_NAMES, CUPS_XY, BALLS_XY)
     })
     return entities
