@@ -210,8 +210,26 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
     # second run shows the same flatline, the budget is still wrong, not the
     # robot.
     cfg.rewards["approach_ball"] = RewardTermCfg(
-        func=approach_ball, weight=8.0,
+        func=approach_ball, weight=3.0,
         params={"sigma": 0.35, "leave_r": 0.30})
+    # **v12.8 (model_3900/4900/5698 test-drive + resumed-run events, 2026-11-17):
+    # the cone got demoted from salary to lighthouse.** v12.7 raised the push
+    # price and the policy responded by walking to 0.14 m of the ball — and
+    # HUGGING it there: `approach_ball` spiked to 4.26 at the run's tail
+    # while `d→cup` stayed frozen at 1.07 m. The hugging pays because the
+    # weight-8 cone pays for *distance*, not for *approach*: standing at
+    # 0.14 m earns ~6.8/step, and pushing earns that PLUS a thin `hoop_progress`
+    # layer (its `v_full` 0.06 m/step is unreachable — a bulldozer advances
+    # the ball 0.5–1 cm/step, so a real push cashed only ~1/step of the 12).
+    # The push beats parking by a margin too thin to move a risk-averse
+    # policy. Now the ladder is explicit: parking near the ball pays 3×cone
+    # (≤2.6/step, the worst chair), walking toward anything pays up to 10
+    # (`ball_progress`, recalibrated below), and pushing the ball toward its
+    # cup pays up to 12 at a speed a walk can actually hit. Each rung is
+    # strictly richer than the one below it, and the cone left at 3.0 is
+    # just the beacon that says where to aim the ladder.
+    # (sigma/leave_r unchanged: orientation and the stage-2 hand-off still
+    # work exactly as v9 designed.)
     # v9 stop rule: the cone goes quiet when the ball is near the hoop, so
     # the push stage owns the end of the court; `ball_lifted` below is the
     # only stage that still cares about height.
@@ -225,7 +243,16 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
     # collapsed to 0.11). Progress pays for the walk itself -- 6.0 per step at
     # v_full against standing's 0.0 -- so the 1.2 comfort gap stops mattering.
     cfg.rewards["ball_progress"] = RewardTermCfg(
-        func=BallProgress, weight=6.0, params={"v_full": 0.15})
+        func=BallProgress, weight=10.0, params={"v_full": 0.005})
+    # v12.8: walking becomes the main income. Units matter and v4 got them
+    # wrong quietly: `v_full` is METRES PER CONTROL STEP (0.02 s), not m/s —
+    # the old 0.15 asked for a 7.5 m/s approach that never happens, which is
+    # why `ball_progress` measured 0.03–0.05 in every run's log: the term
+    # was alive but priced at ~1/30th of nominal. 0.005 = a 5 mm/step close
+    # = the 0.25 m/s walk the gait actually produces → walking toward the
+    # target now pays the FULL 10/step. A hugging policy closes nothing
+    # (0/step beyond gait bob), a circling policy closes little, and from
+    # 0.14 m there is no way to keep closing except THROUGH the ball.
     # v9: the lift stage is **retired** (weight 0). Its premise failed eight
     # times over: `five_foot/env_cfg.py` measures the stowed claw hanging
     # 40 mm off the floor, and no gait in this machine lowers the palm to a
@@ -245,7 +272,13 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
     # and there is no camera" objection (the policy reads ball_rel_pos /
     # hoop_rel_pos directly as observations; vision is not required).
     cfg.rewards["hoop_progress"] = RewardTermCfg(
-        func=BallToHoopProgress, weight=12.0, params={"v_full": 0.06})
+        func=BallToHoopProgress, weight=12.0, params={"v_full": 0.01})
+    # v12.8: `v_full` 0.06→0.01 — the currency fixed to the physical rate.
+    # A 1 cm/step sustained advance (ball speed 0.5 m/s at 50 Hz — actually
+    # generous; a real bulldoze is 0.5–1 cm/step) now cashes the FULL 12/step,
+    # and even the 0.5 cm/step gentle creep pays 6/step: pushing becomes the
+    # best chair in the room by construction. v12.7's 13x nominal raise
+    # collapsed to ~1x in practice because the divisor was unreachable.
     # **v12.7 (test-drive of model_1900/2700/3699, 2026-11-16): the push had
     # to become the best-paying chair in the room, and it was not.** The
     # deterministic policy walks to 0.19 m of the ball (approach ~0.9/step)
