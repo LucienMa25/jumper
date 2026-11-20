@@ -36,10 +36,16 @@ def agent_cfg() -> RslRlOnPolicyRunnerCfg:
         # ── PPO ──
         # 0.005 was the family's; the v2 run collapsed action std to 0.09 by
         # iteration ~900 and the policy stopped exploring toward the ball
-        # entirely (approach_ball flat at its spawn baseline). This task needs
-        # the policy to *walk away from the comfortable stance* to find reward,
-        # so its entropy bonus is raised until measured otherwise.
-        entropy_coef=0.03,
+        # entirely (approach_ball flat at its spawn baseline), so v7 raised it
+        # to 0.03 to keep exploration alive. Exploration has now *done its
+        # job* (v12.9 @9299: ball_in_hoop pulses every few iterations) but the
+        # mean policy cannot score on its own (deterministic eval: 1.6% vs the
+        # noise-carried ~10% deliveries) and std sits stubbornly at 1.77 from
+        # 7300 to 9299. v12.10 harvests: back to 0.005 so the critic-validated
+        # scoring trajectories get consolidated into the mean actions. If the
+        # harvest collapses approach behaviour before in-cup stabilises, undo
+        # one step to 0.01 rather than the full 0.03.
+        entropy_coef=0.005,
         learning_rate=1.0e-3,
         desired_kl=0.01,
         gamma=0.99,
