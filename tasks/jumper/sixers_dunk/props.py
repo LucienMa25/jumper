@@ -196,7 +196,17 @@ def _hoop_spec(body_name: str = "dunk_hoop"):
     nseg = 24
     step = 2.0 * _math.pi / nseg
     half_chord = r_wall * _math.tan(step / 2) + 0.004   # + overlap at joints
-    mouth = _math.asin(min(0.95, 0.060 / r_wall))       # half-angle of the gap
+    # v12.11: the mouth widened. The v12.10 harvest proved the scoring push
+    # lives only in the action noise (std 1.77 -> 0.59 while deterministic
+    # in-cup went 1.6% -> 0.0%): the aim tolerance a *mean* action needs at
+    # this doorway is smaller than the push-precision the policy can hold.
+    # Panels drop out in whole 15-deg steps, so the FREE opening (measured
+    # edge-to-edge between kept panels) jumps ~84 mm (0.060, five panels
+    # gone) -> ~139 mm (0.085, seven gone). The 80 mm ball had a 2 mm-per-
+    # side aim tolerance through the old doorway — no wonder the mean policy
+    # never scored. Score deterministically first; this constant creeps back
+    # toward 0.060 once the push survives the mean policy.
+    mouth = _math.asin(min(0.95, 0.085 / r_wall))       # half-angle of the gap
     for i in range(nseg):
         a = step * i
         da = abs((a - _math.pi + _math.pi) % (2 * _math.pi) - _math.pi)  # to 180°
