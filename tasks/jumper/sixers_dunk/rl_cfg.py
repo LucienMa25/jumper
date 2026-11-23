@@ -41,11 +41,15 @@ def agent_cfg() -> RslRlOnPolicyRunnerCfg:
         # job* (v12.9 @9299: ball_in_hoop pulses every few iterations) but the
         # mean policy cannot score on its own (deterministic eval: 1.6% vs the
         # noise-carried ~10% deliveries) and std sits stubbornly at 1.77 from
-        # 7300 to 9299. v12.10 harvests: back to 0.005 so the critic-validated
-        # scoring trajectories get consolidated into the mean actions. If the
-        # harvest collapses approach behaviour before in-cup stabilises, undo
-        # one step to 0.01 rather than the full 0.03.
-        entropy_coef=0.005,
+        # 7300 to 9299. v12.10 harvested at 0.005. Verdict (11/23): std fell
+        # 1.77 -> 0.59 exactly as intended and training kept scoring through
+        # the residual noise (pulses to 4.4 near iter 11290), but deterministic
+        # in-cup went 1.6% -> 0.0% at BOTH 10500 and 11298 — the harvest
+        # drained the noise faster than the mean absorbed the push. The
+        # binding constraint is push *precision* at the 120 mm mouth, not the
+        # exploration budget; v12.11 pairs the family midpoint 0.01 (keep the
+        # scoring trajectories alive) with the widened 150 mm mouth in props.
+        entropy_coef=0.01,
         learning_rate=1.0e-3,
         desired_kl=0.01,
         gamma=0.99,
