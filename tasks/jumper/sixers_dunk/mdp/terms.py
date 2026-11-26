@@ -347,6 +347,50 @@ def carry_to_hoop(env: ManagerBasedRlEnv, sigma: float = 0.35) -> torch.Tensor:
     return torch.exp(-(d / sigma) ** 2) * active.float()
 
 
+def _balls_vel(env: ManagerBasedRlEnv) -> torch.Tensor:
+    """Every ball's root-link linear velocity, stacked [B, N, 3] world frame
+    (`root_link_vel_w` is [:, :3] of the (lin, ang) twist, same per-env world
+    as `root_link_pose_w` above)."""
+    return torch.stack(
+        [env.scene[name].data.root_link_vel_w[:, :3] for name in BALL_NAMES],
+        dim=1)
+
+
+def push_alignment(env: ManagerBasedRlEnv, near_r: float = 0.30,
+                   v_full: float = 0.02) -> torch.Tensor:
+    """v12.12 (the deterministic-hole fix): the target ball moving **in the
+    direction of its own cup**, scaled by how fast, paid only while the ball
+    is near its cup.
+
+    Why this exists where the progress ladder did not: the mean policy at
+    v12.11 walked to the ball and nudged it (d→cup closed to a record-low
+    0.78, closing 0.028 m/step) yet scored 0% deterministically — the last
+    metres are a *direction* skill the distance terms can only see late and
+    per-step (prev−d), and GAE smears that credit back through a ±0.61-std
+    action haze. This term pays **cos(∠(v_ball, cup−ball)) × speed** every
+    step while near the mouth: a ball shoved straight at the opening earns
+    `v/v_full` (a 2 cm/step bulldoze = 1.0) whether or not the gap closes
+    this instant, so the correct push is dense, early, and independent of
+    the noise around it — exactly what the mean can consolidate.
+
+    Hugging pays ~0 (ball still), backing off pays −1× the ramp: the sign
+    is the whole instruction. No contact gate (v12.3 lesson): only a pushed
+    ball has horizontal velocity near the cup in the first place.
+    """
+    idx, active = target_ball(env)
+    v = _pick(_balls_vel(env), idx)
+    b = _pick(_balls_pos(env), idx)
+    c = _pick(_cups_pos(env), idx)
+    gap = c[:, :2] - b[:, :2]
+    d = torch.linalg.norm(gap, dim=1)
+    u = gap / d.clamp(min=1e-4)[:, None]
+    cos = (v[:, :2] * u).sum(dim=1) / v[:, :2].norm(dim=1).clamp(min=1e-6)
+    speed = v[:, :2].norm(dim=1)
+    near = (d < near_r).float()
+    return (cos * (speed / v_full).clamp(0.0, 1.0) * near
+            * active.float()).clamp(-1.0, 1.0)
+
+
 def ball_in_hoop(env: ManagerBasedRlEnv) -> torch.Tensor:
     """The score: **fraction of the three balls in their cups** — 1/3 per
     delivered ball, held for the rest of the episode. Re-read every step,
