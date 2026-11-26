@@ -41,7 +41,7 @@ from mjlab.managers.reward_manager import RewardTermCfg
 from ..five_foot.env_cfg import env_cfg as _five_foot_env_cfg
 from .mdp.terms import (BALL_SENSORS, BallProgress, BallToHoopProgress,
                         approach_ball, ball_in_hoop, ball_lifted, ball_score_count,
-                        carry_to_hoop, hoop_rel_pos, ball_rel_pos)
+                        carry_to_hoop, hoop_rel_pos, ball_rel_pos, push_alignment)
 from ..five_foot.claw import FINGER_JOINT, GRIPPER_CLOSED, GRIPPER_OPEN
 from ..five_foot.env_cfg import FIVE_FOOT_JOINTS
 from .props import BALL_NAMES, CUP_NAMES, dunk_entities
@@ -297,6 +297,22 @@ def _apply_hoop_world(cfg, *, play: bool) -> None:
     # built is wanted; parking at the ball simply stops being profitable.)
     cfg.rewards["ball_in_hoop"] = RewardTermCfg(
         func=ball_in_hoop, weight=15.0)
+    # v12.12 (2026-11-26, the deterministic-hole diagnosis): v12.11's mean
+    # policy drives the ball at a record closing rate (eval d→cup 0.78,
+    # closing 0.028) and STILL scores 0% without noise — the distance ladder
+    # (prev−d) credits the push only after the geometry has already closed,
+    # too late and too thin for GAE to claim through a ±0.61-std haze.
+    # `push_alignment` prices the DIRECTION every step while the ball is
+    # inside 0.30 m of its cup: cos(v_ball → cup) × speed/0.02, in [-1, 1].
+    # Weight 6.0 sits deliberately between carry's cone (6) and the progress
+    # ladder (10-12): a straight 2 cm/step shove adds ~6/step on top of the
+    # ladder it accompanies — pushing *toward* the mouth finally outsells
+    # pushing at all, which is the one behaviour the deterministic eval
+    # never produced. Economics checked against v12.8's ladder, not replaced
+    # by hand: total push-stage pay ~6+12 vs hug 3+6, unchanged ratio.
+    cfg.rewards["push_alignment"] = RewardTermCfg(
+        func=push_alignment, weight=6.0,
+        params={"near_r": 0.30, "v_full": 0.02})
 
     # ── v5: zero the standing-comfort terms ────────────────────────────────
     # v4's curve (2026-11-07, 4090D, 4000 iters) ended exactly at the
